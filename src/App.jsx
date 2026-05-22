@@ -9,6 +9,7 @@ const CATS = [
   { id:"fruits",     name:"Fruits",      icon:"🍎",  color:"#22C55E" },
   { id:"diver",      name:"Diver",       icon:"🤿",  color:"#06B6D4" },
   { id:"diver_x",    name:"Diver X",     icon:"💫",  color:"#A855F7" },
+  { id:"body_staff", name:"Body Staff",  icon:"💪",  color:"#06D6D6" },
   { id:"rosa_fee",   name:"Rosa Fee",    icon:"🌹",  color:"#EC4899" },
   { id:"kids_fee",   name:"Kids Fee",    icon:"🧒",  color:"#EAB308" },
   { id:"car_fee",    name:"Car Fee",     icon:"🚗",  color:"#64748B" },
