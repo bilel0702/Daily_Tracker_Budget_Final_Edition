@@ -14,6 +14,7 @@ const CATS = [
   { id:"kids_fee",   name:"Kids Fee",    icon:"🧒",  color:"#EAB308" },
   { id:"car_fee",    name:"Car Fee",     icon:"🚗",  color:"#64748B" },
   { id:"parent_fee", name:"Parent Fee",  icon:"👨‍👩‍👦",  color:"#84CC16" },
+  { id:"home_fee",   name:"Home Fee",    icon:"🏠",  color:"#10B981" },
   { id:"unexpected", name:"Unexpected",  icon:"⚡",  color:"#EF4444" },
   { id:"financial",  name:"Financial",   icon:"💰",  color:"#F59E0B" },
   { id:"trip_fee",   name:"Trip",        icon:"✈️",  color:"#3B82F6" },
@@ -27,7 +28,7 @@ const today  = () => new Date().toISOString().split("T")[0];
 const mKey   = d  => d.toISOString().slice(0,7);
 const yKey   = d  => String(d.getFullYear());
 const getCat = id => CATS.find(c=>c.id===id) || CATS[0];
-const total  = arr=> arr.reduce((s,e)=>s+e.amount, 0);
+const total  = arr=> arr.filter(e=>e.category!=="financial").reduce((s,e)=>s+e.amount, 0);
 
 // money / moneyFull are redefined inside App() as currency-aware versions
 
