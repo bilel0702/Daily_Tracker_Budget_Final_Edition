@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useCallback, useRef } from "react";
-import { motion, AnimatePresence } from "framer-motion";
-import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
+import { motion, AnimatePresence, useMotionValue, useSpring, useTransform } from "framer-motion";
+import { PieChart, Pie, Cell, BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid, AreaChart, Area } from "recharts";
 
 // ─────────────────────────────────────────────────────────────
 //  Constants
@@ -14,7 +14,7 @@ const CATS = [
   { id:"rosa_fee",   name:"Rosa Fee",    icon:"🌹",  color:"#EC4899" },
   { id:"kids_fee",   name:"Kids Fee",    icon:"🧒",  color:"#EAB308" },
   { id:"car_fee",    name:"Car Fee",     icon:"🚗",  color:"#64748B" },
-  { id:"parent_fee", name:"Parent Fee",  icon:"👨‍👩‍👦",  color:"#84CC16" },
+  { id:"parent_fee", name:"Parent Fee",  icon:"👨‍👩‍👦", color:"#84CC16" },
   { id:"home_fee",   name:"Home Fee",    icon:"🏠",  color:"#10B981" },
   { id:"unexpected", name:"Unexpected",  icon:"⚡",  color:"#EF4444" },
   { id:"financial",  name:"Financial",   icon:"💰",  color:"#F59E0B" },
@@ -22,8 +22,8 @@ const CATS = [
   { id:"study_fee",  name:"Study",       icon:"📚",  color:"#8B5CF6" },
 ];
 
-const MONTHS   = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
-const DAYS     = ["Su","Mo","Tu","We","Th","Fr","Sa"];
+const MONTHS    = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+const DAYS      = ["Su","Mo","Tu","We","Th","Fr","Sa"];
 const NAV_ORDER = ["home","calendar","history","reports","settings"];
 
 const today  = () => new Date().toISOString().split("T")[0];
@@ -49,12 +49,12 @@ async function sheetsSync(url, action, payload) {
 }
 
 // ─────────────────────────────────────────────────────────────
-//  AnimatedNumber — counts up/down when value changes
+//  AnimatedNumber — smooth counter
 // ─────────────────────────────────────────────────────────────
-function AnimatedNumber({ value, format, duration = 700 }) {
+function AnimatedNumber({ value, format, duration = 800 }) {
   const [display, setDisplay] = useState(value);
-  const rafRef      = useRef(null);
-  const prevValRef  = useRef(value);
+  const rafRef     = useRef(null);
+  const prevValRef = useRef(value);
 
   useEffect(() => {
     const from = prevValRef.current;
@@ -64,8 +64,8 @@ function AnimatedNumber({ value, format, duration = 700 }) {
     if (rafRef.current) cancelAnimationFrame(rafRef.current);
     const start = performance.now();
     const tick = now => {
-      const t  = Math.min((now - start) / duration, 1);
-      const e  = 1 - Math.pow(1 - t, 3); // cubic ease-out
+      const t = Math.min((now - start) / duration, 1);
+      const e = 1 - Math.pow(1 - t, 4); // quartic ease-out — snappier feel
       setDisplay(from + (to - from) * e);
       if (t < 1) rafRef.current = requestAnimationFrame(tick);
     };
@@ -77,34 +77,92 @@ function AnimatedNumber({ value, format, duration = 700 }) {
 }
 
 // ─────────────────────────────────────────────────────────────
+//  Skeleton loader
+// ─────────────────────────────────────────────────────────────
+function Skeleton({ w = "100%", h = 20, r = 10, style = {} }) {
+  return (
+    <div style={{
+      width: w, height: h, borderRadius: r,
+      background: "linear-gradient(90deg, rgba(255,255,255,.04) 25%, rgba(255,255,255,.1) 50%, rgba(255,255,255,.04) 75%)",
+      backgroundSize: "200% 100%",
+      animation: "shimmer 1.6s infinite",
+      ...style
+    }} />
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
+//  Ripple hook
+// ─────────────────────────────────────────────────────────────
+function useRipple() {
+  const [ripples, setRipples] = useState([]);
+  const addRipple = (e) => {
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    const id = Date.now();
+    setRipples(r => [...r, { x, y, id }]);
+    setTimeout(() => setRipples(r => r.filter(rp => rp.id !== id)), 600);
+  };
+  return [ripples, addRipple];
+}
+
+function RippleButton({ children, onClick, style, className, disabled, whileHover, whileTap }) {
+  const [ripples, addRipple] = useRipple();
+  return (
+    <motion.button
+      className={className}
+      disabled={disabled}
+      whileHover={whileHover}
+      whileTap={whileTap}
+      onClick={(e) => { addRipple(e); onClick && onClick(e); }}
+      style={{ position: "relative", overflow: "hidden", ...style }}
+    >
+      {children}
+      {ripples.map(r => (
+        <span key={r.id} style={{
+          position:"absolute", left:r.x, top:r.y,
+          width:4, height:4, borderRadius:"50%",
+          background:"rgba(255,255,255,0.35)",
+          transform:"translate(-50%,-50%) scale(0)",
+          animation:"rippleAnim 0.6s ease-out forwards",
+          pointerEvents:"none",
+        }}/>
+      ))}
+    </motion.button>
+  );
+}
+
+// ─────────────────────────────────────────────────────────────
 //  Motion variants
 // ─────────────────────────────────────────────────────────────
 const pageVariants = {
-  enter: dir => ({ x: dir * 44, opacity: 0 }),
-  center: { x: 0, opacity: 1 },
-  exit: dir => ({ x: -dir * 28, opacity: 0 }),
+  enter: dir => ({ x: dir * 48, opacity: 0, scale: 0.98 }),
+  center: { x: 0, opacity: 1, scale: 1 },
+  exit: dir => ({ x: -dir * 32, opacity: 0, scale: 0.98 }),
 };
-const pageTransition = { type: "spring", stiffness: 300, damping: 30 };
+const pageTransition = { type: "spring", stiffness: 320, damping: 32 };
 
 const listContainer = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.045 } },
+  show: { transition: { staggerChildren: 0.05, delayChildren: 0.04 } },
 };
 const listItem = {
-  hidden: { opacity: 0, x: -18 },
-  show:   { opacity: 1, x: 0, transition: { type: "spring", stiffness: 340, damping: 26 } },
+  hidden: { opacity: 0, x: -22, scale: 0.96 },
+  show:   { opacity: 1, x: 0, scale: 1, transition: { type: "spring", stiffness: 360, damping: 28 } },
 };
 
 const gridContainer = {
   hidden: {},
-  show: { transition: { staggerChildren: 0.035, delayChildren: 0.05 } },
+  show: { transition: { staggerChildren: 0.04, delayChildren: 0.06 } },
 };
 const gridItem = {
-  hidden: { opacity: 0, scale: 0.78, y: 8 },
-  show:   { opacity: 1, scale: 1,    y: 0, transition: { type: "spring", stiffness: 380, damping: 22 } },
+  hidden: { opacity: 0, scale: 0.75, y: 12 },
+  show:   { opacity: 1, scale: 1,    y: 0, transition: { type: "spring", stiffness: 400, damping: 24 } },
 };
 
-const springSheet = { type: "spring", stiffness: 300, damping: 30 };
+const springSheet = { type: "spring", stiffness: 320, damping: 32 };
+const springFast  = { type: "spring", stiffness: 460, damping: 28 };
 
 // ─────────────────────────────────────────────────────────────
 //  App
@@ -133,10 +191,10 @@ export default function App() {
   const [gsOn,       setGsOn]       = useState(false);
   const [gsBusy,     setGsBusy]     = useState(false);
   const [urlDraft,   setUrlDraft]   = useState("");
+  const [focusedInput, setFocusedInput] = useState(null);
 
   const prevPageRef = useRef("home");
 
-  // ── Navigate with direction tracking ─────────────────────
   const navigate = useCallback(to => {
     const fromIdx = NAV_ORDER.indexOf(prevPageRef.current);
     const toIdx   = NAV_ORDER.indexOf(to);
@@ -145,28 +203,24 @@ export default function App() {
     setPage(to);
   }, []);
 
-  // ── Persist ──────────────────────────────────────────────
   useEffect(()=>{
     try {
       const r=localStorage.getItem("exp_v4"); if(r) setExpenses(JSON.parse(r));
       const c=localStorage.getItem("exp_cfg4"); if(c){const p=JSON.parse(c);setDark(p.dark??true);setCurrency(p.currency??"DA");}
       const u=localStorage.getItem("exp_gsurl"); if(u){setScriptUrl(u);setUrlDraft(u);setGsOn(true);}
     } catch{}
-    setLoading(false);
+    setTimeout(()=>setLoading(false), 600); // slight delay for skeleton effect
   },[]);
 
   const persist = useCallback(data=>{
     try{localStorage.setItem("exp_v4",JSON.stringify(data));}catch{}
   },[]);
 
-  const capitalizeFirst = str => {
-    if (!str) return str;
-    return str.charAt(0).toUpperCase() + str.slice(1);
-  };
+  const capitalizeFirst = str => str ? str.charAt(0).toUpperCase() + str.slice(1) : str;
 
   const sym = currency === "DA" ? "DA" : currency === "USD" ? "$" : "€";
   const money = n => {
-    if (currency === "DA") return n >= 1000 ? `DA ${(n/1000).toFixed(1)}k` : `DA ${n.toFixed(2)}`;
+    if (currency === "DA") return n >= 1000 ? `DA ${(n/1000).toFixed(1)}k` : `DA ${Math.round(n)}`;
     if (n >= 1000) return sym + (n/1000).toFixed(1) + "k";
     return sym + n.toFixed(2);
   };
@@ -176,14 +230,16 @@ export default function App() {
     return new Intl.NumberFormat("de-DE",{style:"currency",currency:"EUR"}).format(n||0);
   };
 
-  const toast$ = useCallback((msg,bad=false)=>{
-    setToast({msg,bad}); setTimeout(()=>setToast(null),2600);
+  const toast$ = useCallback((msg, bad=false, icon="")=>{
+    setToast({msg, bad, icon}); setTimeout(()=>setToast(null), 2800);
   },[]);
 
   // ── CRUD ─────────────────────────────────────────────────
   const saveExp = async () => {
     if (saving) return;
-    if (!form.name.trim() || !form.amount || isNaN(+form.amount)) return;
+    if (!form.name.trim() || !form.amount || isNaN(+form.amount)) {
+      toast$("Please fill name and amount", true, "⚠️"); return;
+    }
     setSaving(true);
     try {
       const d = new Date(form.date+"T12:00:00");
@@ -195,9 +251,9 @@ export default function App() {
         next = expenses.map(e=>e.id===editId?u:e);
         if (gsOn) {
           const sync = await sheetsSync(scriptUrl, "update", { expense: u });
-          if (!sync.success) toast$("Saved locally. Sheets sync failed.", true);
-          else toast$("Updated ✓");
-        } else { toast$("Updated ✓"); }
+          if (!sync.success) toast$("Saved locally. Sheets sync failed.", true, "⚠️");
+          else toast$("Updated successfully", false, "✅");
+        } else { toast$("Updated successfully", false, "✅"); }
       } else {
         const ex = { id:Date.now().toString(), name:form.name.trim(),
           amount:+form.amount, notes:form.notes.trim(), date:form.date,
@@ -206,9 +262,9 @@ export default function App() {
         next = [ex,...expenses];
         if (gsOn) {
           const sync = await sheetsSync(scriptUrl, "add", { expense: ex });
-          if (!sync.success) toast$("Saved locally. Sheets sync failed.", true);
-          else toast$("Saved ✓");
-        } else { toast$("Saved ✓"); }
+          if (!sync.success) toast$("Saved locally. Sheets sync failed.", true, "⚠️");
+          else toast$("Expense saved", false, "✅");
+        } else { toast$("Expense saved", false, "✅"); }
       }
       setExpenses(next); persist(next); closeModal();
     } finally { setSaving(false); }
@@ -218,14 +274,15 @@ export default function App() {
     const next = expenses.filter(e=>e.id!==id);
     setExpenses(next); persist(next); setDelId(null);
     if (gsOn) sheetsSync(scriptUrl,"delete",{id});
-    toast$("Deleted",true);
+    toast$("Expense removed", true, "🗑️");
   };
 
   const closeModal = () => {
     setModal(false); setSelCat(null); setEditId(null);
     setForm({name:"",amount:"",notes:"",date:today()});
+    setFocusedInput(null);
   };
-  const openAdd  = (cat,date) => { setSelCat(cat); setForm({name:"",amount:"",notes:"",date:date||today()}); setModal(true); };
+  const openAdd  = (cat, date) => { setSelCat(cat); setForm({name:"",amount:"",notes:"",date:date||today()}); setModal(true); };
   const openEdit = ex => { setSelCat(getCat(ex.category)); setForm({name:ex.name,amount:String(ex.amount),notes:ex.notes||"",date:ex.date}); setEditId(ex.id); setModal(true); };
 
   const restoreSheets = async () => {
@@ -233,15 +290,15 @@ export default function App() {
     try {
       const r = await fetch(scriptUrl+"?v="+Date.now());
       const d = await r.json();
-      if (d.expenses) { setExpenses(d.expenses); persist(d.expenses); toast$(`Restored ${d.expenses.length} ✓`); }
-    } catch { toast$("Restore failed",true); }
+      if (d.expenses) { setExpenses(d.expenses); persist(d.expenses); toast$(`Restored ${d.expenses.length} expenses`, false, "☁️"); }
+    } catch { toast$("Restore failed", true, "⚠️"); }
     setGsBusy(false);
   };
 
   const connectGs = async () => {
     if (!urlDraft.trim()) return;
     const candidate = urlDraft.trim();
-    if (!candidate.startsWith("https://")) { toast$("Enter a valid Apps Script URL", true); return; }
+    if (!candidate.startsWith("https://")) { toast$("Enter a valid Apps Script URL", true, "⚠️"); return; }
     setGsBusy(true);
     try {
       const res  = await fetch(`${candidate}?v=${Date.now()}`);
@@ -249,13 +306,13 @@ export default function App() {
       const data = await res.json();
       if (!data || !Array.isArray(data.expenses)) throw new Error(data?.error || "Invalid script URL");
       localStorage.setItem("exp_gsurl", candidate);
-      setScriptUrl(candidate); setGsOn(true); toast$("Connected ✓");
-    } catch { toast$("Connect failed", true); }
+      setScriptUrl(candidate); setGsOn(true); toast$("Google Sheets connected", false, "🔗");
+    } catch { toast$("Connection failed", true, "⚠️"); }
     setGsBusy(false);
   };
   const disconnectGs = () => {
     localStorage.removeItem("exp_gsurl");
-    setScriptUrl(""); setGsOn(false); toast$("Disconnected");
+    setScriptUrl(""); setGsOn(false); toast$("Disconnected from Sheets", false, "📴");
   };
 
   // ── Derived ───────────────────────────────────────────────
@@ -273,6 +330,13 @@ export default function App() {
   const monthlyBar = useMemo(()=>Array.from({length:6},(_,i)=>{
     const d=new Date(); d.setMonth(d.getMonth()-(5-i));
     return {month:MONTHS[d.getMonth()], v:+total(expenses.filter(e=>e.date.startsWith(mKey(d)))).toFixed(2)};
+  }),[expenses]);
+
+  // Weekly breakdown for area chart
+  const weeklyArea = useMemo(()=>Array.from({length:7},(_,i)=>{
+    const d=new Date(); d.setDate(d.getDate()-6+i);
+    const ds=d.toISOString().split("T")[0];
+    return { day: DAYS[d.getDay()], v: +total(expenses.filter(e=>e.date===ds)).toFixed(2) };
   }),[expenses]);
 
   const pieData = catTotals.filter(c=>c.total>0).slice(0,6);
@@ -300,145 +364,234 @@ export default function App() {
   },[expenses,calDate]);
 
   // ── Theme ─────────────────────────────────────────────────
-  const K = {
-    bg:      dark ? "#07090F" : "#F0F2F8",
-    card:    dark ? "#0F1520" : "#FFFFFF",
-    card2:   dark ? "#18202E" : "#F5F7FC",
-    border:  dark ? "#1E2A3E" : "#DDE3F0",
-    text:    dark ? "#EEF2FF" : "#0C1020",
-    sub:     dark ? "#6B7A99" : "#6B7A99",
+  const K = dark ? {
+    bg:      "#060A14",
+    card:    "#0D1525",
+    card2:   "#131E30",
+    card3:   "#182338",
+    border:  "#1C2B42",
+    border2: "#243347",
+    text:    "#E8EEF8",
+    sub:     "#5A6A85",
+    sub2:    "#3D4F68",
     accent:  "#6366F1",
+    accentL: "#818CF8",
     amber:   "#F59E0B",
     green:   "#22C55E",
     red:     "#EF4444",
+    teal:    "#06B6D4",
+    glass:   "rgba(13,21,37,0.85)",
+  } : {
+    bg:      "#F0F3FA",
+    card:    "#FFFFFF",
+    card2:   "#F5F7FD",
+    card3:   "#EDF0FA",
+    border:  "#DDE4F5",
+    border2: "#C8D2EC",
+    text:    "#0B1022",
+    sub:     "#667090",
+    sub2:    "#A0AABF",
+    accent:  "#5558E8",
+    accentL: "#7B7EF4",
+    amber:   "#D97706",
+    green:   "#16A34A",
+    red:     "#DC2626",
+    teal:    "#0891B2",
+    glass:   "rgba(255,255,255,0.9)",
   };
 
   // ── Shared components ─────────────────────────────────────
 
-  // Animated expense row
+  // Premium expense row
   const ExpRow = ({ex, onEdit, onDel, index=0}) => {
     const cat = getCat(ex.category);
+    const [expanded, setExpanded] = useState(false);
     return (
       <motion.div
         layout
-        initial={{ opacity: 0, x: -20 }}
-        animate={{ opacity: 1, x: 0 }}
-        exit={{ opacity: 0, x: 40, transition: { duration: 0.18 } }}
-        transition={{ delay: Math.min(index * 0.045, 0.28), type: "spring", stiffness: 340, damping: 26 }}
-        style={{display:"flex",alignItems:"center",gap:14,padding:"18px 20px",borderBottom:`1px solid ${K.border}`}}
+        variants={listItem}
+        initial="hidden"
+        animate="show"
+        exit={{ opacity:0, x:60, scale:0.92, transition:{duration:0.22, ease:"easeIn"} }}
+        style={{borderBottom:`1px solid ${K.border}`}}
       >
-        {/* Big icon bubble */}
         <motion.div
-          whileHover={{ scale: 1.1, rotate: 6 }}
-          transition={{ type: "spring", stiffness: 400, damping: 18 }}
+          whileHover={{ backgroundColor: K.card2 }}
+          onClick={() => setExpanded(!expanded)}
           style={{
-            width:60, height:60, borderRadius:20,
-            background:cat.color+"25",
-            display:"flex", alignItems:"center", justifyContent:"center",
-            fontSize:32, flexShrink:0,
-          }}>{cat.icon}</motion.div>
+            display:"flex", alignItems:"center", gap:14,
+            padding:"16px 18px", cursor:"pointer",
+            transition:"background 0.15s",
+          }}
+        >
+          {/* Icon bubble with shimmer */}
+          <motion.div
+            whileHover={{ scale: 1.12, rotate: 8 }}
+            whileTap={{ scale: 0.92 }}
+            transition={springFast}
+            style={{
+              width:52, height:52, borderRadius:18,
+              background:`linear-gradient(145deg, ${cat.color}30, ${cat.color}18)`,
+              border:`1.5px solid ${cat.color}40`,
+              display:"flex", alignItems:"center", justifyContent:"center",
+              fontSize:28, flexShrink:0,
+              boxShadow:`0 4px 16px ${cat.color}18`,
+            }}
+          >{cat.icon}</motion.div>
 
-        {/* Info */}
-        <div style={{flex:1, minWidth:0}}>
-          <div style={{fontSize:17,fontWeight:700,color:K.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.name}</div>
-          <div style={{display:"flex",alignItems:"center",gap:8,marginTop:5}}>
-            <span style={{background:cat.color+"20",color:cat.color,padding:"3px 10px",borderRadius:20,fontSize:12,fontWeight:700}}>
-              {cat.name}
-            </span>
-            <span style={{fontSize:13,color:K.sub}}>{ex.date}</span>
+          <div style={{flex:1, minWidth:0}}>
+            <div style={{fontSize:16, fontWeight:700, color:K.text, overflow:"hidden", textOverflow:"ellipsis", whiteSpace:"nowrap"}}>{ex.name}</div>
+            <div style={{display:"flex", alignItems:"center", gap:8, marginTop:4}}>
+              <span style={{
+                background:`${cat.color}18`, color:cat.color,
+                padding:"2px 9px", borderRadius:20,
+                fontSize:11, fontWeight:700,
+                border:`1px solid ${cat.color}30`,
+              }}>{cat.name}</span>
+              <span style={{fontSize:12, color:K.sub}}>{new Date(ex.date+"T12:00:00").toLocaleDateString("en-US",{month:"short",day:"numeric"})}</span>
+            </div>
           </div>
-          {ex.notes && <div style={{fontSize:13,color:K.sub,marginTop:4,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{ex.notes}</div>}
-        </div>
 
-        {/* Amount + actions stacked */}
-        <div style={{flexShrink:0,display:"flex",flexDirection:"column",alignItems:"flex-end",gap:8}}>
-          <div style={{fontSize:19,fontWeight:900,color:cat.color}}>{moneyFull(ex.amount)}</div>
-          <div style={{display:"flex",gap:8}}>
-            <motion.button
-              onClick={onEdit}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.88 }}
-              style={{
-                width:44, height:44, borderRadius:14,
-                border:"none", background:K.accent+"22", color:K.accent,
-                cursor:"pointer", fontSize:20, display:"flex",
-                alignItems:"center", justifyContent:"center",
-              }}>✏️</motion.button>
-            <motion.button
-              onClick={onDel}
-              whileHover={{ scale: 1.12 }}
-              whileTap={{ scale: 0.88 }}
-              style={{
-                width:44, height:44, borderRadius:14,
-                border:"none", background:K.red+"22", color:K.red,
-                cursor:"pointer", fontSize:20, display:"flex",
-                alignItems:"center", justifyContent:"center",
-              }}>🗑️</motion.button>
+          <div style={{flexShrink:0, textAlign:"right"}}>
+            <div style={{fontSize:18, fontWeight:900, color:cat.color}}>{moneyFull(ex.amount)}</div>
+            <motion.div
+              animate={{ rotate: expanded ? 180 : 0 }}
+              transition={springFast}
+              style={{fontSize:12, color:K.sub, marginTop:2, display:"flex", justifyContent:"flex-end"}}
+            >▾</motion.div>
           </div>
-        </div>
+        </motion.div>
+
+        {/* Expandable details */}
+        <AnimatePresence>
+          {expanded && (
+            <motion.div
+              initial={{ height:0, opacity:0 }}
+              animate={{ height:"auto", opacity:1 }}
+              exit={{ height:0, opacity:0 }}
+              transition={{ type:"spring", stiffness:380, damping:32 }}
+              style={{overflow:"hidden"}}
+            >
+              <div style={{padding:"0 18px 16px", display:"flex", gap:10}}>
+                {ex.notes && (
+                  <div style={{flex:1, background:K.card2, borderRadius:14, padding:"10px 14px", fontSize:13, color:K.sub, border:`1px solid ${K.border}`}}>
+                    📝 {ex.notes}
+                  </div>
+                )}
+                <motion.button
+                  onClick={(e)=>{e.stopPropagation();onEdit();}}
+                  whileHover={{ scale:1.08 }}
+                  whileTap={{ scale:0.92 }}
+                  style={{width:44,height:44,borderRadius:14,border:`1px solid ${K.border}`,background:K.accent+"18",color:K.accent,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
+                >✏️</motion.button>
+                <motion.button
+                  onClick={(e)=>{e.stopPropagation();onDel();}}
+                  whileHover={{ scale:1.08 }}
+                  whileTap={{ scale:0.92 }}
+                  style={{width:44,height:44,borderRadius:14,border:`1px solid ${K.border}`,background:K.red+"18",color:K.red,cursor:"pointer",fontSize:18,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
+                >🗑️</motion.button>
+              </div>
+            </motion.div>
+          )}
+        </AnimatePresence>
       </motion.div>
     );
   };
 
-  // Section header
-  const SecLabel = ({children, right}) => (
+  // Premium section label
+  const SecLabel = ({children, right, icon}) => (
     <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"22px 20px 12px"}}>
-      <span style={{fontSize:13,fontWeight:800,color:K.sub,letterSpacing:1.2}}>{children}</span>
-      {right && <span style={{fontSize:14,fontWeight:900,color:K.accent}}>{right}</span>}
+      <div style={{display:"flex",alignItems:"center",gap:8}}>
+        {icon && <span style={{fontSize:15}}>{icon}</span>}
+        <span style={{fontSize:11,fontWeight:800,color:K.sub,letterSpacing:1.5,textTransform:"uppercase"}}>{children}</span>
+      </div>
+      {right && <span style={{fontSize:13,fontWeight:700,color:K.accent}}>{right}</span>}
     </div>
   );
 
-  // White card wrapper
-  const Card = ({children, style={}}) => (
-    <div style={{background:K.card,border:`1px solid ${K.border}`,borderRadius:24,...style}}>
+  // Glass card wrapper
+  const Card = ({children, style={}, glow=""}) => (
+    <div style={{
+      background:K.card,
+      border:`1px solid ${K.border}`,
+      borderRadius:24,
+      ...(glow ? { boxShadow:`0 0 32px ${glow}18, 0 4px 24px rgba(0,0,0,.2)` } : {}),
+      ...style
+    }}>
       {children}
     </div>
   );
 
-  // Bottom sheet drawer — spring animated
+  // Glass stat chip
+  const StatChip = ({label, value, color, icon, onClick}) => (
+    <motion.div
+      whileHover={{ scale:1.03, y:-2 }}
+      whileTap={{ scale:0.97 }}
+      onClick={onClick}
+      style={{
+        background:`linear-gradient(145deg, ${color}18, ${color}0C)`,
+        border:`1px solid ${color}30`,
+        borderRadius:20, padding:"18px 16px",
+        cursor:onClick?"pointer":"default",
+        backdropFilter:"blur(8px)",
+      }}
+    >
+      <div style={{fontSize:24,marginBottom:8}}>{icon}</div>
+      <div style={{fontSize:11,fontWeight:700,color,letterSpacing:1,marginBottom:4}}>{label.toUpperCase()}</div>
+      <div style={{fontSize:22,fontWeight:900,color:K.text,lineHeight:1}}>
+        <AnimatedNumber value={value} format={money} />
+      </div>
+    </motion.div>
+  );
+
+  // Bottom sheet drawer
   const BottomSheet = ({show, onClose, title, sub, children}) => (
     <AnimatePresence>
       {show && (
         <motion.div
           key="bottom-sheet-overlay"
-          initial={{ opacity: 0 }}
-          animate={{ opacity: 1 }}
-          exit={{ opacity: 0 }}
+          initial={{ opacity:0 }}
+          animate={{ opacity:1 }}
+          exit={{ opacity:0 }}
           style={{position:"absolute",inset:0,zIndex:300,display:"flex",flexDirection:"column"}}
         >
-          <motion.div onClick={onClose} style={{flex:1,background:"rgba(0,0,0,.65)",backdropFilter:"blur(8px)"}}/>
           <motion.div
-            initial={{ y: "100%" }}
-            animate={{ y: 0 }}
-            exit={{ y: "100%" }}
+            onClick={onClose}
+            initial={{ opacity:0 }}
+            animate={{ opacity:1 }}
+            style={{flex:1, background:"rgba(0,0,0,.72)", backdropFilter:"blur(10px)"}}
+          />
+          <motion.div
+            initial={{ y:"100%" }}
+            animate={{ y:0 }}
+            exit={{ y:"100%" }}
             transition={springSheet}
             style={{
-              background:K.card, borderRadius:"32px 32px 0 0",
+              background:K.card,
+              borderRadius:"32px 32px 0 0",
               maxHeight:"88vh", display:"flex", flexDirection:"column",
-              overflow:"hidden", boxShadow:"0 -12px 60px rgba(0,0,0,.6)",
+              overflow:"hidden",
+              boxShadow:"0 -16px 60px rgba(0,0,0,.6)",
+              border:`1px solid ${K.border}`,
+              borderBottom:"none",
             }}
           >
-            {/* Pill handle */}
-            <div style={{display:"flex",justifyContent:"center",padding:"16px 0 8px",flexShrink:0}}>
-              <div style={{width:48,height:5,borderRadius:3,background:K.border}}/>
+            <div style={{display:"flex",justifyContent:"center",padding:"14px 0 6px",flexShrink:0}}>
+              <div style={{width:42,height:4,borderRadius:2,background:K.border2}}/>
             </div>
-            {/* Header */}
             {title && (
-              <div style={{padding:"4px 24px 20px",borderBottom:`1px solid ${K.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+              <div style={{padding:"4px 24px 18px",borderBottom:`1px solid ${K.border}`,flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
                 <div>
-                  <div style={{fontSize:22,fontWeight:900,color:K.text}}>{title}</div>
-                  {sub && <div style={{fontSize:14,color:K.sub,marginTop:4}}>{sub}</div>}
+                  <div style={{fontSize:21,fontWeight:900,color:K.text}}>{title}</div>
+                  {sub && <div style={{fontSize:13,color:K.sub,marginTop:4}}>{sub}</div>}
                 </div>
                 <motion.button
                   onClick={onClose}
-                  whileHover={{ scale: 1.1 }}
-                  whileTap={{ scale: 0.9 }}
-                  style={{
-                    width:48, height:48, borderRadius:16,
-                    border:`1px solid ${K.border}`, background:K.card2,
-                    color:K.sub, cursor:"pointer", fontSize:22,
-                    display:"flex", alignItems:"center", justifyContent:"center",
-                  }}>✕</motion.button>
+                  whileHover={{ scale:1.1,rotate:90 }}
+                  whileTap={{ scale:0.9 }}
+                  transition={springFast}
+                  style={{width:44,height:44,borderRadius:14,border:`1px solid ${K.border}`,background:K.card2,color:K.sub,cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center"}}
+                >✕</motion.button>
               </div>
             )}
             <div style={{overflowY:"auto",WebkitOverflowScrolling:"touch",flex:1}}>
@@ -462,119 +615,201 @@ export default function App() {
       {label:"This Year",  icon:"📊", exps:yearExp,  color:"#22C55E"},
     ];
 
-    return (
-      <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:110}}>
+    const topCat = catTotals[0];
+    const monthGrand = total(monthExp);
+    const avgDaily = monthGrand > 0 ? (monthGrand / now.getDate()).toFixed(0) : 0;
 
-        {/* ── Hero Banner ─────────────────────────── */}
+    return (
+      <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:120}}>
+
+        {/* ── Hero Banner — premium gradient card ─────── */}
         <motion.div
-          initial={{ opacity: 0, y: -16, scale: 0.97 }}
-          animate={{ opacity: 1, y: 0, scale: 1 }}
-          transition={{ type: "spring", stiffness: 280, damping: 24, delay: 0.05 }}
+          initial={{ opacity:0, y:-20, scale:0.97 }}
+          animate={{ opacity:1, y:0, scale:1 }}
+          transition={{ type:"spring", stiffness:280, damping:26, delay:0.04 }}
           style={{
             margin:"16px 16px 0",
-            background:"linear-gradient(145deg,#6366F1 0%,#7C3AED 100%)",
-            borderRadius:30, padding:"30px 26px 26px",
+            background: dark
+              ? "linear-gradient(145deg,#1e1b4b 0%,#312e81 40%,#1e3a5f 100%)"
+              : "linear-gradient(145deg,#4338ca 0%,#5b21b6 50%,#1d4ed8 100%)",
+            borderRadius:30, padding:"28px 24px 24px",
             position:"relative", overflow:"hidden",
+            border:"1px solid rgba(255,255,255,.1)",
+            boxShadow:"0 20px 60px rgba(99,102,241,.3), 0 8px 32px rgba(0,0,0,.3)",
           }}
         >
-          {/* Decorative circles */}
-          <div style={{position:"absolute",top:-40,right:-40,width:160,height:160,borderRadius:80,background:"rgba(255,255,255,.06)"}}/>
-          <div style={{position:"absolute",bottom:-30,left:-20,width:120,height:120,borderRadius:60,background:"rgba(255,255,255,.04)"}}/>
+          {/* Animated mesh bg */}
+          <div style={{position:"absolute",top:-60,right:-60,width:200,height:200,borderRadius:"50%",background:"rgba(255,255,255,.06)",animation:"blobMove 20s ease-in-out infinite"}}/>
+          <div style={{position:"absolute",bottom:-40,left:-30,width:160,height:160,borderRadius:"50%",background:"rgba(255,255,255,.04)",animation:"blobMoveAlt 25s ease-in-out infinite"}}/>
+          <div style={{position:"absolute",top:"40%",right:"15%",width:100,height:100,borderRadius:"50%",background:"rgba(139,92,246,.25)",filter:"blur(20px)"}}/>
 
           {gsOn && (
-            <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:12}}>
-              <div style={{width:8,height:8,borderRadius:4,background:"#22C55E"}}/>
-              <span style={{fontSize:12,color:"rgba(255,255,255,.65)",fontWeight:600}}>Synced with Google Sheets</span>
-            </div>
+            <motion.div
+              initial={{ opacity:0,x:-10 }}
+              animate={{ opacity:1,x:0 }}
+              style={{display:"flex",alignItems:"center",gap:6,marginBottom:12}}
+            >
+              <motion.div
+                animate={{ scale:[1,1.4,1] }}
+                transition={{ duration:2,repeat:Infinity,ease:"easeInOut" }}
+                style={{width:7,height:7,borderRadius:4,background:"#4ade80"}}
+              />
+              <span style={{fontSize:11,color:"rgba(255,255,255,.6)",fontWeight:600,letterSpacing:.5}}>SYNCED WITH GOOGLE SHEETS</span>
+            </motion.div>
           )}
-          <div style={{fontSize:15,color:"rgba(255,255,255,.7)",marginBottom:10,fontWeight:600}}>Total This Month</div>
 
-          {/* Animated total */}
-          <div style={{fontSize:48,fontWeight:900,color:"#FFF",letterSpacing:-1,lineHeight:1}}>
-            <AnimatedNumber value={total(monthExp)} format={money} />
+          <div style={{fontSize:13,color:"rgba(255,255,255,.6)",marginBottom:8,fontWeight:600,letterSpacing:.5}}>TOTAL THIS MONTH</div>
+          <div style={{fontSize:52,fontWeight:900,color:"#FFF",letterSpacing:-2,lineHeight:1,fontVariantNumeric:"tabular-nums"}}>
+            <AnimatedNumber value={monthGrand} format={money} />
           </div>
-          <div style={{fontSize:14,color:"rgba(255,255,255,.55)",marginTop:8}}>{monthExp.length} transactions</div>
+          <div style={{fontSize:13,color:"rgba(255,255,255,.45)",marginTop:6}}>
+            {monthExp.length} transaction{monthExp.length!==1?"s":""} · avg {money(+avgDaily)}/day
+          </div>
 
-          <div style={{display:"flex",gap:12,marginTop:24}}>
-            {[{l:"Today",v:todayExp},{l:"Year",v:yearExp}].map(({l,v})=>(
-              <div key={l} style={{flex:1,background:"rgba(255,255,255,.13)",borderRadius:20,padding:"16px 18px"}}>
-                <div style={{fontSize:12,color:"rgba(255,255,255,.6)",marginBottom:8,fontWeight:600}}>{l}</div>
-                <div style={{fontSize:22,fontWeight:900,color:"#FFF"}}>
+          <div style={{display:"flex",gap:10,marginTop:22}}>
+            {[{l:"Today",v:todayExp,c:"rgba(255,255,255,.12)"},{l:"This Year",v:yearExp,c:"rgba(255,255,255,.12)"}].map(({l,v,c})=>(
+              <div key={l} style={{flex:1,background:c,borderRadius:18,padding:"14px 16px",backdropFilter:"blur(8px)",border:"1px solid rgba(255,255,255,.1)"}}>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.55)",marginBottom:6,fontWeight:600,letterSpacing:.5}}>{l.toUpperCase()}</div>
+                <div style={{fontSize:21,fontWeight:900,color:"#FFF"}}>
                   <AnimatedNumber value={total(v)} format={money} />
                 </div>
-                <div style={{fontSize:12,color:"rgba(255,255,255,.45)",marginTop:4}}>{v.length} items</div>
+                <div style={{fontSize:11,color:"rgba(255,255,255,.38)",marginTop:3}}>{v.length} items</div>
               </div>
             ))}
           </div>
         </motion.div>
 
-        {/* ── Period tap-cards ────────────────────── */}
-        <SecLabel>TAP TO SEE EXPENSES</SecLabel>
+        {/* ── Quick stat chips ─────────────────────────── */}
+        {topCat && topCat.total > 0 && (
+          <motion.div
+            initial={{ opacity:0, y:12 }}
+            animate={{ opacity:1, y:0 }}
+            transition={{ delay:0.12, type:"spring", stiffness:300, damping:26 }}
+            style={{margin:"14px 16px 0",background:K.card,border:`1px solid ${K.border}`,borderRadius:22,padding:"16px 18px",display:"flex",alignItems:"center",gap:16}}
+          >
+            <div style={{width:48,height:48,borderRadius:16,background:`${topCat.color}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,border:`1px solid ${topCat.color}30`,flexShrink:0}}>{topCat.icon}</div>
+            <div style={{flex:1,minWidth:0}}>
+              <div style={{fontSize:11,fontWeight:700,color:K.sub,letterSpacing:.8,marginBottom:3}}>TOP CATEGORY</div>
+              <div style={{fontSize:15,fontWeight:800,color:K.text,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{topCat.name}</div>
+            </div>
+            <div style={{fontSize:18,fontWeight:900,color:topCat.color}}>{money(topCat.total)}</div>
+          </motion.div>
+        )}
+
+        {/* ── Period cards ─────────────────────────────── */}
+        <SecLabel icon="📊">TAP TO EXPLORE</SecLabel>
         <motion.div
           variants={gridContainer}
           initial="hidden"
           animate="show"
-          style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,padding:"0 16px"}}
+          style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,padding:"0 16px"}}
         >
           {periods.map(p=>(
             <motion.button
               key={p.label}
               variants={gridItem}
-              whileHover={{ y: -5, scale: 1.02, boxShadow: `0 12px 32px ${p.color}22` }}
-              whileTap={{ scale: 0.96 }}
+              whileHover={{ y:-5, scale:1.02, boxShadow:`0 16px 40px ${p.color}22` }}
+              whileTap={{ scale:0.95 }}
               onClick={()=>setDrawer({title:p.label, sub:`${p.exps.length} transactions · ${moneyFull(total(p.exps))}`, exps:p.exps})}
               style={{
-                background:K.card, border:`1.5px solid ${K.border}`,
-                borderRadius:24, padding:"22px 18px",
+                background:K.card,
+                border:`1.5px solid ${K.border}`,
+                borderRadius:24, padding:"20px 16px",
                 textAlign:"left", cursor:"pointer",
+                transition:"box-shadow 0.2s",
               }}
             >
-              <div style={{fontSize:40,marginBottom:14}}>{p.icon}</div>
-              <div style={{fontSize:12,fontWeight:800,color:p.color,letterSpacing:.8,marginBottom:8}}>{p.label.toUpperCase()}</div>
-              <div style={{fontSize:26,fontWeight:900,color:K.text,lineHeight:1}}>{money(total(p.exps))}</div>
-              <div style={{fontSize:13,color:K.sub,marginTop:8}}>{p.exps.length} transactions</div>
+              <div style={{
+                width:44,height:44,borderRadius:14,
+                background:`${p.color}18`,
+                border:`1px solid ${p.color}30`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:22,marginBottom:12,
+              }}>{p.icon}</div>
+              <div style={{fontSize:11,fontWeight:800,color:K.sub,letterSpacing:1,marginBottom:6}}>{p.label.toUpperCase()}</div>
+              <div style={{fontSize:24,fontWeight:900,color:p.color,lineHeight:1}}>
+                <AnimatedNumber value={total(p.exps)} format={money} />
+              </div>
+              <div style={{fontSize:12,color:K.sub,marginTop:6}}>{p.exps.length} transactions</div>
             </motion.button>
           ))}
         </motion.div>
 
-        {/* ── Quick add grid ──────────────────────── */}
-        <SecLabel>QUICK ADD</SecLabel>
+        {/* ── 7-day sparkline ──────────────────────────── */}
+        {weeklyArea.some(d=>d.v>0) && (
+          <>
+            <SecLabel icon="📈">THIS WEEK</SecLabel>
+            <Card style={{margin:"0 16px",padding:"18px 16px 12px"}}>
+              <ResponsiveContainer width="100%" height={120}>
+                <AreaChart data={weeklyArea} margin={{top:4,right:4,left:-30,bottom:0}}>
+                  <defs>
+                    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+                      <stop offset="5%" stopColor={K.accent} stopOpacity={0.35}/>
+                      <stop offset="95%" stopColor={K.accent} stopOpacity={0.0}/>
+                    </linearGradient>
+                  </defs>
+                  <XAxis dataKey="day" tick={{fill:K.sub,fontSize:12}} axisLine={false} tickLine={false}/>
+                  <YAxis tick={{fill:K.sub,fontSize:10}} axisLine={false} tickLine={false}/>
+                  <Tooltip
+                    contentStyle={{background:K.card2,border:`1px solid ${K.border}`,color:K.text,borderRadius:12,fontSize:13}}
+                    formatter={v=>[moneyFull(v),""]}
+                    cursor={{stroke:K.accent,strokeWidth:1,strokeDasharray:"4 4"}}
+                  />
+                  <Area type="monotone" dataKey="v" stroke={K.accent} strokeWidth={2.5} fill="url(#areaGrad)" dot={{ fill:K.accent, r:3, strokeWidth:0 }} activeDot={{ r:5, fill:K.accentL }}/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </Card>
+          </>
+        )}
+
+        {/* ── Quick add grid ───────────────────────────── */}
+        <SecLabel icon="⚡">QUICK ADD</SecLabel>
         <motion.div
           variants={gridContainer}
           initial="hidden"
           animate="show"
-          style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:12,padding:"0 16px"}}
+          style={{display:"grid",gridTemplateColumns:"repeat(4,1fr)",gap:10,padding:"0 16px"}}
         >
           {CATS.map(cat=>(
             <motion.button
               key={cat.id}
               variants={gridItem}
-              whileHover={{ scale: 1.06, y: -3 }}
-              whileTap={{ scale: 0.88 }}
+              whileHover={{ scale:1.07, y:-4, boxShadow:`0 10px 24px ${cat.color}20` }}
+              whileTap={{ scale:0.88 }}
               onClick={()=>openAdd(cat)}
               style={{
-                background:K.card, border:`1.5px solid ${K.border}`,
-                borderRadius:22, padding:"20px 6px 16px",
+                background:K.card,
+                border:`1.5px solid ${K.border}`,
+                borderRadius:20, padding:"18px 4px 14px",
                 textAlign:"center", cursor:"pointer",
                 display:"flex", flexDirection:"column",
-                alignItems:"center", gap:10,
+                alignItems:"center", gap:8,
+                transition:"box-shadow 0.2s",
               }}
             >
-              <div style={{fontSize:38}}>{cat.icon}</div>
-              <div style={{fontSize:11,fontWeight:700,color:K.sub,lineHeight:1.3,textAlign:"center"}}>{cat.name}</div>
+              <div style={{
+                width:44,height:44,borderRadius:14,
+                background:`${cat.color}18`,
+                border:`1px solid ${cat.color}30`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:24,
+              }}>{cat.icon}</div>
+              <div style={{fontSize:10,fontWeight:700,color:K.sub,lineHeight:1.3,textAlign:"center"}}>{cat.name}</div>
             </motion.button>
           ))}
         </motion.div>
 
-        {/* ── Recent ──────────────────────────────── */}
+        {/* ── Recent ────────────────────────────────────── */}
         {expenses.length > 0 && <>
-          <SecLabel right={`${expenses.length} total`}>RECENT</SecLabel>
+          <SecLabel icon="🕐" right={`${expenses.length} total`}>RECENT</SecLabel>
           <Card style={{margin:"0 16px",overflow:"hidden"}}>
-            <AnimatePresence initial={false}>
-              {expenses.slice(0,5).map((ex, i)=>(
-                <ExpRow key={ex.id} ex={ex} index={i} onEdit={()=>openEdit(ex)} onDel={()=>setDelId(ex.id)}/>
-              ))}
-            </AnimatePresence>
+            <motion.div variants={listContainer} initial="hidden" animate="show">
+              <AnimatePresence initial={false}>
+                {expenses.slice(0,5).map((ex,i)=>(
+                  <ExpRow key={ex.id} ex={ex} index={i} onEdit={()=>openEdit(ex)} onDel={()=>setDelId(ex.id)}/>
+                ))}
+              </AnimatePresence>
+            </motion.div>
           </Card>
         </>}
       </div>
@@ -601,36 +836,40 @@ export default function App() {
       return {month:MONTHS[i],key,tot:total(ex),count:ex.length};
     });
 
+    const maxYr = Math.max(...yrBreak.map(b=>b.tot), 1);
+
     const grouped = {};
     [...shown].sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach(ex=>{
       if (!grouped[ex.date]) grouped[ex.date]=[];
       grouped[ex.date].push(ex);
     });
 
-    return (
-      <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:110}}>
+    const NavBtn = ({onClick,children}) => (
+      <motion.button
+        whileHover={{ scale:1.06, backgroundColor:K.card3 }}
+        whileTap={{ scale:0.88 }}
+        onClick={onClick}
+        style={{width:48,height:48,borderRadius:16,border:`1px solid ${K.border}`,background:K.card2,color:K.text,cursor:"pointer",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center",transition:"background 0.15s"}}
+      >{children}</motion.button>
+    );
 
-        {/* View switcher */}
+    return (
+      <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:120}}>
+
         <div style={{padding:"16px 16px 12px"}}>
-          <div style={{display:"flex",background:K.card2,borderRadius:22,padding:6,gap:4,border:`1px solid ${K.border}`}}>
-            {[["day","📅 Day"],["month","🗓️ Month"],["year","📊 Year"]].map(([v,l])=>(
+          <div style={{display:"flex",background:K.card2,borderRadius:20,padding:5,gap:3,border:`1px solid ${K.border}`,position:"relative"}}>
+            {[["day","Day"],["month","Month"],["year","Year"]].map(([v,l])=>(
               <motion.button
                 key={v}
                 onClick={()=>setCalView(v)}
-                whileTap={{ scale: 0.95 }}
-                style={{
-                  flex:1, padding:"15px 0", borderRadius:16, border:"none",
-                  background:calView===v ? K.accent : "transparent",
-                  color:calView===v ? "#FFF" : K.sub,
-                  cursor:"pointer", fontSize:15, fontWeight:800,
-                  position: "relative",
-                }}
+                whileTap={{ scale:0.94 }}
+                style={{flex:1,padding:"13px 0",borderRadius:15,border:"none",background:"transparent",color:calView===v?"#FFF":K.sub,cursor:"pointer",fontSize:14,fontWeight:700,position:"relative",zIndex:1}}
               >
                 {calView===v && (
                   <motion.div
-                    layoutId="cal-view-pill"
-                    style={{position:"absolute",inset:0,borderRadius:16,background:K.accent,zIndex:-1}}
-                    transition={{ type: "spring", stiffness: 340, damping: 28 }}
+                    layoutId="cal-pill"
+                    style={{position:"absolute",inset:0,borderRadius:15,background:K.accent,zIndex:-1}}
+                    transition={{ type:"spring",stiffness:360,damping:30 }}
                   />
                 )}
                 {l}
@@ -639,27 +878,26 @@ export default function App() {
           </div>
         </div>
 
-        {/* Month calendar grid */}
         {calView!=="year" && (
-          <Card style={{margin:"0 16px 16px",overflow:"hidden"}}>
-            <div style={{padding:"20px 20px 16px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-              <motion.button whileTap={{scale:0.88}} onClick={prevM} style={{width:52,height:52,borderRadius:18,border:`1px solid ${K.border}`,background:K.card2,color:K.text,cursor:"pointer",fontSize:26,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</motion.button>
+          <Card style={{margin:"0 16px 14px",overflow:"hidden"}}>
+            <div style={{padding:"18px 18px 14px",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:`1px solid ${K.border}`}}>
+              <NavBtn onClick={prevM}>‹</NavBtn>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:20,fontWeight:900,color:K.text}}>{MONTHS[calDate.getMonth()]} {calDate.getFullYear()}</div>
-                <div style={{fontSize:15,color:K.amber,fontWeight:700,marginTop:4}}>
+                <div style={{fontSize:18,fontWeight:900,color:K.text}}>{MONTHS[calDate.getMonth()]} {calDate.getFullYear()}</div>
+                <div style={{fontSize:14,color:K.amber,fontWeight:700,marginTop:3}}>
                   <AnimatedNumber value={total(monExps)} format={moneyFull} />
                 </div>
               </div>
-              <motion.button whileTap={{scale:0.88}} onClick={nextM} style={{width:52,height:52,borderRadius:18,border:`1px solid ${K.border}`,background:K.card2,color:K.text,cursor:"pointer",fontSize:26,display:"flex",alignItems:"center",justifyContent:"center"}}>›</motion.button>
+              <NavBtn onClick={nextM}>›</NavBtn>
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"0 14px 10px"}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"12px 12px 6px"}}>
               {DAYS.map(d=>(
-                <div key={d} style={{textAlign:"center",fontSize:13,fontWeight:800,color:K.sub,padding:"4px 0"}}>{d}</div>
+                <div key={d} style={{textAlign:"center",fontSize:12,fontWeight:700,color:K.sub,padding:"3px 0"}}>{d}</div>
               ))}
             </div>
 
-            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"0 10px 18px",gap:4}}>
+            <div style={{display:"grid",gridTemplateColumns:"repeat(7,1fr)",padding:"0 8px 16px",gap:3}}>
               {calGrid.map((cell,i)=>{
                 if (!cell) return <div key={`e${i}`}/>;
                 const isTod = cell.ds===today();
@@ -668,21 +906,21 @@ export default function App() {
                 return (
                   <motion.button
                     key={cell.ds}
-                    whileTap={{ scale: 0.85 }}
+                    whileHover={{ scale:1.12 }}
+                    whileTap={{ scale:0.82 }}
                     onClick={()=>{setCalDay(cell.ds);setCalView("day");}}
                     style={{
-                      aspectRatio:"1", borderRadius:14, border:"none",
-                      background: isSel ? K.accent : isTod ? K.accent+"35" : has ? K.card2 : "transparent",
-                      outline: isTod&&!isSel ? `2px solid ${K.accent}` : "none",
+                      aspectRatio:"1", borderRadius:12, border:"none",
+                      background: isSel ? K.accent : isTod ? K.accent+"30" : "transparent",
+                      outline: isTod&&!isSel ? `2px solid ${K.accent}60` : "none",
                       outlineOffset:"-2px",
                       cursor:"pointer",
                       display:"flex", flexDirection:"column",
-                      alignItems:"center", justifyContent:"center", gap:2, padding:3,
+                      alignItems:"center", justifyContent:"center", gap:2, padding:2,
                     }}
                   >
-                    <div style={{fontSize:16,fontWeight:isTod||isSel?900:500,color:isSel?"#FFF":K.text,lineHeight:1}}>{cell.day}</div>
-                    {has && <div style={{fontSize:9,color:isSel?"rgba(255,255,255,.8)":K.amber,fontWeight:700,lineHeight:1}}>${cell.tot.toFixed(0)}</div>}
-                    {has && !isSel && <div style={{width:5,height:5,borderRadius:3,background:K.accent}}/>}
+                    <div style={{fontSize:14,fontWeight:isTod||isSel?800:400,color:isSel?"#FFF":K.text,lineHeight:1}}>{cell.day}</div>
+                    {has && <div style={{width:4,height:4,borderRadius:2,background:isSel?"rgba(255,255,255,.8)":K.amber}}/>}
                   </motion.button>
                 );
               })}
@@ -690,86 +928,79 @@ export default function App() {
           </Card>
         )}
 
-        {/* Year view */}
         {calView==="year" && (
-          <Card style={{margin:"0 16px 16px",padding:"20px 16px"}}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:22}}>
-              <motion.button whileTap={{scale:0.88}} onClick={prevY} style={{width:52,height:52,borderRadius:18,border:`1px solid ${K.border}`,background:K.card2,color:K.text,cursor:"pointer",fontSize:26,display:"flex",alignItems:"center",justifyContent:"center"}}>‹</motion.button>
+          <Card style={{margin:"0 16px 14px",padding:"18px 16px"}}>
+            <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:20}}>
+              <NavBtn onClick={prevY}>‹</NavBtn>
               <div style={{textAlign:"center"}}>
-                <div style={{fontSize:24,fontWeight:900,color:K.text}}>{calDate.getFullYear()}</div>
-                <div style={{fontSize:15,color:K.amber,fontWeight:700,marginTop:4}}>
-                  Total: <AnimatedNumber value={total(yrExps)} format={moneyFull} />
+                <div style={{fontSize:22,fontWeight:900,color:K.text}}>{calDate.getFullYear()}</div>
+                <div style={{fontSize:14,color:K.amber,fontWeight:700,marginTop:3}}>
+                  <AnimatedNumber value={total(yrExps)} format={moneyFull} />
                 </div>
               </div>
-              <motion.button whileTap={{scale:0.88}} onClick={nextY} style={{width:52,height:52,borderRadius:18,border:`1px solid ${K.border}`,background:K.card2,color:K.text,cursor:"pointer",fontSize:26,display:"flex",alignItems:"center",justifyContent:"center"}}>›</motion.button>
+              <NavBtn onClick={nextY}>›</NavBtn>
             </div>
-            <motion.div
-              variants={gridContainer}
-              initial="hidden"
-              animate="show"
-              style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:12}}
-            >
+            <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
               {yrBreak.map(({month,key,tot,count})=>{
                 const isCur = key===mKey(new Date());
+                const pct   = tot/maxYr*100;
                 return (
                   <motion.button
                     key={key}
-                    variants={gridItem}
-                    whileHover={{ scale: 1.04, y: -2 }}
-                    whileTap={{ scale: 0.94 }}
+                    whileHover={{ scale:1.04,y:-2 }}
+                    whileTap={{ scale:0.94 }}
                     onClick={()=>{const d=new Date(calDate);d.setMonth(MONTHS.indexOf(month));setCalDate(d);setCalView("month");}}
                     style={{
-                      background:isCur?K.accent+"22":K.card2,
-                      border:`2px solid ${isCur?K.accent:K.border}`,
-                      borderRadius:20, padding:"18px 12px",
-                      cursor:"pointer", textAlign:"left",
+                      background:isCur ? K.accent+"20" : K.card2,
+                      border:`1.5px solid ${isCur?K.accent:K.border}`,
+                      borderRadius:18, padding:"14px 12px",
+                      cursor:"pointer", textAlign:"left", overflow:"hidden", position:"relative",
                     }}
                   >
-                    <div style={{fontSize:15,fontWeight:800,color:isCur?K.accent:K.text}}>{month}</div>
-                    <div style={{fontSize:17,fontWeight:900,color:tot>0?K.amber:K.sub,marginTop:8}}>{tot>0?money(tot):"—"}</div>
-                    <div style={{fontSize:12,color:K.sub,marginTop:4}}>{count} items</div>
+                    <div style={{position:"absolute",bottom:0,left:0,right:0,height:`${pct}%`,background:isCur?K.accent+"18":K.border+"60",transition:"height 0.4s",zIndex:0}}/>
+                    <div style={{position:"relative",zIndex:1}}>
+                      <div style={{fontSize:13,fontWeight:800,color:isCur?K.accent:K.text}}>{month}</div>
+                      <div style={{fontSize:15,fontWeight:900,color:tot>0?K.amber:K.sub2,marginTop:6}}>{tot>0?money(tot):"—"}</div>
+                      <div style={{fontSize:10,color:K.sub,marginTop:2}}>{count} items</div>
+                    </div>
                   </motion.button>
                 );
               })}
-            </motion.div>
+            </div>
           </Card>
         )}
 
-        {/* Jump to date */}
-        <div style={{background:K.card,border:`1px solid ${K.border}`,borderRadius:22,margin:"0 16px 16px",padding:"18px 20px",display:"flex",alignItems:"center",gap:16}}>
-          <div style={{width:52,height:52,borderRadius:18,background:K.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:30,flexShrink:0}}>🗓️</div>
+        <div style={{background:K.card,border:`1px solid ${K.border}`,borderRadius:20,margin:"0 16px 14px",padding:"16px 18px",display:"flex",alignItems:"center",gap:14}}>
+          <div style={{width:44,height:44,borderRadius:14,background:K.accent+"20",display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,flexShrink:0}}>🗓️</div>
           <div style={{flex:1}}>
-            <div style={{fontSize:12,fontWeight:800,color:K.sub,letterSpacing:.8,marginBottom:8}}>JUMP TO ANY DATE</div>
+            <div style={{fontSize:11,fontWeight:700,color:K.sub,letterSpacing:.8,marginBottom:6}}>JUMP TO DATE</div>
             <input type="date" defaultValue={today()}
               onChange={e=>{if(e.target.value){setCalDay(e.target.value);setCalDate(new Date(e.target.value+"T12:00:00"));setCalView("day");}}}
-              style={{fontSize:16,color:K.text,background:"transparent",border:"none",outline:"none",width:"100%",cursor:"pointer",fontFamily:"inherit",fontWeight:700}}/>
+              style={{fontSize:15,color:K.text,background:"transparent",border:"none",outline:"none",width:"100%",cursor:"pointer",fontFamily:"inherit",fontWeight:600}}/>
           </div>
         </div>
 
-        {/* Period total bar */}
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"4px 20px 14px"}}>
-          <div style={{fontSize:13,fontWeight:800,color:K.sub,letterSpacing:.8}}>
+          <div style={{fontSize:12,fontWeight:700,color:K.sub,letterSpacing:.8}}>
             {calView==="day" ? calDay : calView==="month" ? `${MONTHS[calDate.getMonth()]} ${calDate.getFullYear()}` : calDate.getFullYear()}
           </div>
-          <div style={{fontSize:18,fontWeight:900,color:K.accent}}>
+          <div style={{fontSize:17,fontWeight:900,color:K.accent}}>
             <AnimatedNumber value={total(shown)} format={moneyFull} />
           </div>
         </div>
 
-        {/* Expense list */}
         {shown.length===0 ? (
-          <Card style={{margin:"0 16px",padding:"52px 20px",textAlign:"center"}}>
+          <Card style={{margin:"0 16px",padding:"48px 20px",textAlign:"center"}}>
             <motion.div initial={{scale:0.7,opacity:0}} animate={{scale:1,opacity:1}} transition={{type:"spring",stiffness:280,damping:20}}>
-              <div style={{fontSize:60,marginBottom:16}}>📭</div>
+              <div style={{fontSize:56,marginBottom:14}}>📭</div>
             </motion.div>
-            <div style={{fontSize:18,fontWeight:700,color:K.sub,marginBottom:20}}>No expenses here</div>
+            <div style={{fontSize:17,fontWeight:700,color:K.sub,marginBottom:20}}>No expenses here</div>
             <motion.button
-              whileHover={{ scale: 1.04 }}
-              whileTap={{ scale: 0.96 }}
+              whileHover={{ scale:1.04,y:-2 }}
+              whileTap={{ scale:0.96 }}
               onClick={()=>openAdd(CATS[0], calView==="day"?calDay:today())}
-              style={{padding:"16px 32px",borderRadius:18,border:"none",background:K.accent,color:"#FFF",cursor:"pointer",fontSize:16,fontWeight:800}}>
-              + Add Expense
-            </motion.button>
+              style={{padding:"14px 28px",borderRadius:16,border:"none",background:K.accent,color:"#FFF",cursor:"pointer",fontSize:15,fontWeight:700,boxShadow:`0 6px 20px ${K.accent}40`}}
+            >+ Add Expense</motion.button>
           </Card>
         ) : (
           <Card style={{margin:"0 16px",overflow:"hidden"}}>
@@ -777,11 +1008,9 @@ export default function App() {
               {Object.entries(grouped).map(([date,exps])=>(
                 <div key={date}>
                   {calView!=="day" && (
-                    <div style={{display:"flex",justifyContent:"space-between",padding:"14px 20px 10px",background:K.card2,borderBottom:`1px solid ${K.border}`}}>
-                      <span style={{fontSize:14,fontWeight:800,color:K.sub}}>
-                        {new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}
-                      </span>
-                      <span style={{fontSize:14,fontWeight:900,color:K.amber}}>{moneyFull(total(exps))}</span>
+                    <div style={{display:"flex",justifyContent:"space-between",padding:"12px 18px 8px",background:K.card2,borderBottom:`1px solid ${K.border}`}}>
+                      <span style={{fontSize:13,fontWeight:700,color:K.sub}}>{new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
+                      <span style={{fontSize:13,fontWeight:800,color:K.amber}}>{moneyFull(total(exps))}</span>
                     </div>
                   )}
                   {exps.map((ex,i)=><ExpRow key={ex.id} ex={ex} index={i} onEdit={()=>openEdit(ex)} onDel={()=>setDelId(ex.id)}/>)}
@@ -795,29 +1024,36 @@ export default function App() {
   };
 
   // ════════════════════════════════════════════════════════
-  //  PAGE: HISTORY / SEARCH
+  //  PAGE: HISTORY
   // ════════════════════════════════════════════════════════
   const PageHistory = () => (
     <div style={{display:"flex",flexDirection:"column",height:"100%",overflow:"hidden"}}>
-      {/* Big search bar */}
-      <div style={{padding:"16px 16px 12px",flexShrink:0}}>
-        <div style={{display:"flex",alignItems:"center",background:K.card,border:`1.5px solid ${K.border}`,borderRadius:20,padding:"0 20px",gap:14}}>
-          <span style={{fontSize:26,color:K.sub}}>🔍</span>
-          <input value={search} onChange={e=>setSearch(e.target.value)}
+      <div style={{padding:"16px 16px 10px",flexShrink:0}}>
+        <div style={{display:"flex",alignItems:"center",background:K.card,border:`1.5px solid ${K.border}`,borderRadius:18,padding:"0 18px",gap:12}}>
+          <span style={{fontSize:20,color:K.sub}}>🔍</span>
+          <input
+            value={search}
+            onChange={e=>setSearch(e.target.value)}
             placeholder="Search expenses…"
-            style={{flex:1,padding:"18px 0",background:"transparent",border:"none",outline:"none",color:K.text,fontSize:17,fontFamily:"inherit"}}/>
-          {search && (
-            <motion.button
-              whileTap={{ scale: 0.85, rotate: 90 }}
-              onClick={()=>setSearch("")}
-              style={{background:"none",border:"none",color:K.sub,cursor:"pointer",fontSize:22,padding:0}}
-            >✕</motion.button>
-          )}
+            style={{flex:1,padding:"16px 0",background:"transparent",border:"none",outline:"none",color:K.text,fontSize:16,fontFamily:"inherit"}}
+          />
+          <AnimatePresence>
+            {search && (
+              <motion.button
+                initial={{ scale:0,opacity:0 }}
+                animate={{ scale:1,opacity:1 }}
+                exit={{ scale:0,opacity:0 }}
+                transition={springFast}
+                whileTap={{ scale:0.8,rotate:90 }}
+                onClick={()=>setSearch("")}
+                style={{background:"none",border:"none",color:K.sub,cursor:"pointer",fontSize:18,padding:0,display:"flex"}}
+              >✕</motion.button>
+            )}
+          </AnimatePresence>
         </div>
       </div>
 
-      {/* Category filter chips */}
-      <div style={{padding:"0 16px 14px",overflowX:"auto",display:"flex",gap:10,WebkitOverflowScrolling:"touch",flexShrink:0}}>
+      <div style={{padding:"0 16px 12px",overflowX:"auto",display:"flex",gap:8,WebkitOverflowScrolling:"touch",flexShrink:0}}>
         {[{id:"all",name:"All",icon:"🗂️",color:K.accent},...CATS].map(c=>{
           const active = filterCat===c.id;
           const col    = c.id==="all" ? K.accent : (getCat(c.id)?.color||K.accent);
@@ -825,40 +1061,43 @@ export default function App() {
             <motion.button
               key={c.id}
               onClick={()=>setFilterCat(c.id)}
-              whileHover={{ scale: 1.05 }}
-              whileTap={{ scale: 0.92 }}
+              whileHover={{ scale:1.05 }}
+              whileTap={{ scale:0.9 }}
               style={{
-                flexShrink:0, padding:"12px 18px", borderRadius:26,
+                flexShrink:0, padding:"9px 14px", borderRadius:20,
                 border:`1.5px solid ${active?col:K.border}`,
-                background:active ? col+"25" : K.card,
+                background:active ? `${col}22` : K.card,
                 color:active ? col : K.sub,
-                cursor:"pointer", fontSize:14, fontWeight:700,
-                whiteSpace:"nowrap", display:"flex", gap:8, alignItems:"center",
+                cursor:"pointer", fontSize:13, fontWeight:700,
+                whiteSpace:"nowrap", display:"flex", gap:6, alignItems:"center",
               }}
             >
-              <span style={{fontSize:20}}>{c.icon}</span>{c.name}
+              <span style={{fontSize:16}}>{c.icon}</span>{c.name}
             </motion.button>
           );
         })}
       </div>
 
-      {/* Count + total */}
-      <div style={{padding:"0 20px 12px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-        <span style={{fontSize:14,color:K.sub,fontWeight:600}}>{filtered.length} result{filtered.length!==1?"s":""}</span>
-        <span style={{fontSize:17,fontWeight:900,color:K.accent}}>
+      <div style={{padding:"0 20px 10px",flexShrink:0,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+        <span style={{fontSize:13,color:K.sub,fontWeight:600}}>{filtered.length} result{filtered.length!==1?"s":""}</span>
+        <span style={{fontSize:16,fontWeight:900,color:K.accent}}>
           <AnimatedNumber value={total(filtered)} format={moneyFull} />
         </span>
       </div>
 
-      {/* List */}
-      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",paddingBottom:110}}>
+      <div style={{flex:1,overflowY:"auto",WebkitOverflowScrolling:"touch",paddingBottom:120}}>
         {filtered.length===0 ? (
-          <div style={{textAlign:"center",padding:"80px 20px",color:K.sub,fontSize:17}}>No expenses found</div>
+          <div style={{textAlign:"center",padding:"80px 20px"}}>
+            <div style={{fontSize:48,marginBottom:12}}>🔎</div>
+            <div style={{color:K.sub,fontSize:16,fontWeight:600}}>No expenses found</div>
+          </div>
         ) : (
           <Card style={{margin:"0 16px",overflow:"hidden"}}>
-            <AnimatePresence initial={false}>
-              {filtered.map((ex, i)=><ExpRow key={ex.id} ex={ex} index={i} onEdit={()=>openEdit(ex)} onDel={()=>setDelId(ex.id)}/>)}
-            </AnimatePresence>
+            <motion.div variants={listContainer} initial="hidden" animate="show">
+              <AnimatePresence initial={false}>
+                {filtered.map((ex,i)=><ExpRow key={ex.id} ex={ex} index={i} onEdit={()=>openEdit(ex)} onDel={()=>setDelId(ex.id)}/>)}
+              </AnimatePresence>
+            </motion.div>
           </Card>
         )}
       </div>
@@ -868,245 +1107,307 @@ export default function App() {
   // ════════════════════════════════════════════════════════
   //  PAGE: REPORTS
   // ════════════════════════════════════════════════════════
-  const PageReports = () => (
-    <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:110}}>
-      <SecLabel>OVERVIEW</SecLabel>
-      <motion.div
-        variants={gridContainer}
-        initial="hidden"
-        animate="show"
-        style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,padding:"0 16px"}}
-      >
-        {[
-          {l:"This Month",v:total(monthExp),icon:"🗓️",c:"#6366F1"},
-          {l:"This Year", v:total(yearExp), icon:"📊",c:"#22C55E"},
-          {l:"Today",     v:total(todayExp),icon:"📅",c:"#F59E0B"},
-          {l:"Top Cat",   v:catTotals[0]?.total||0,icon:catTotals[0]?.icon||"🏆",c:"#EF4444",sub:catTotals[0]?.name},
-        ].map((s,i)=>(
-          <motion.div key={i} variants={gridItem} style={{background:K.card,border:`1px solid ${K.border}`,borderRadius:24,padding:"22px 18px"}}>
-            <div style={{fontSize:40,marginBottom:14}}>{s.icon}</div>
-            <div style={{fontSize:12,fontWeight:800,color:K.sub,letterSpacing:.8}}>{s.l.toUpperCase()}</div>
-            <div style={{fontSize:24,fontWeight:900,color:s.c,marginTop:6,lineHeight:1}}>
-              <AnimatedNumber value={s.v} format={money} />
-            </div>
-            {s.sub && <div style={{fontSize:12,color:K.sub,marginTop:6}}>{s.sub}</div>}
-          </motion.div>
-        ))}
-      </motion.div>
+  const PageReports = () => {
+    const topCat = catTotals[0];
+    const grandTotal = total(expenses);
 
-      <SecLabel>6-MONTH TREND</SecLabel>
-      <Card style={{margin:"0 16px",padding:"20px 16px 12px"}}>
-        <ResponsiveContainer width="100%" height={210}>
-          <BarChart data={monthlyBar} margin={{top:0,right:0,left:-20,bottom:0}}>
-            <CartesianGrid strokeDasharray="3 3" stroke={K.border} vertical={false}/>
-            <XAxis dataKey="month" tick={{fill:K.sub,fontSize:13}} axisLine={false} tickLine={false}/>
-            <YAxis tick={{fill:K.sub,fontSize:11}} axisLine={false} tickLine={false}/>
-            <Tooltip contentStyle={{background:K.card,border:`1px solid ${K.border}`,color:K.text,borderRadius:14,fontSize:14}} formatter={v=>[moneyFull(v),"Total"]}/>
-            <Bar dataKey="v" fill={K.accent} radius={[8,8,0,0]}/>
-          </BarChart>
-        </ResponsiveContainer>
-      </Card>
+    // Custom pie label
+    const renderPieLabel = ({ cx,cy,midAngle,innerRadius,outerRadius,percent,name }) => {
+      if (percent < 0.06) return null;
+      const RADIAN = Math.PI / 180;
+      const r = innerRadius + (outerRadius - innerRadius) * 0.6;
+      const x = cx + r * Math.cos(-midAngle * RADIAN);
+      const y = cy + r * Math.sin(-midAngle * RADIAN);
+      return (
+        <text x={x} y={y} fill="white" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700}>
+          {`${(percent*100).toFixed(0)}%`}
+        </text>
+      );
+    };
 
-      {pieData.length>0 && <>
-        <SecLabel>BY CATEGORY</SecLabel>
-        <Card style={{margin:"0 16px",padding:"20px 16px 8px"}}>
-          <ResponsiveContainer width="100%" height={240}>
-            <PieChart>
-              <Pie data={pieData} cx="50%" cy="50%" outerRadius={100} innerRadius={46} dataKey="total" nameKey="name">
-                {pieData.map(c=><Cell key={c.id} fill={c.color}/>)}
-              </Pie>
-              <Tooltip formatter={v=>moneyFull(v)} contentStyle={{background:K.card,border:`1px solid ${K.border}`,color:K.text,borderRadius:14,fontSize:14}}/>
-            </PieChart>
+    return (
+      <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:120}}>
+
+        {/* KPI grid */}
+        <SecLabel icon="💡">OVERVIEW</SecLabel>
+        <motion.div
+          variants={gridContainer}
+          initial="hidden"
+          animate="show"
+          style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,padding:"0 16px"}}
+        >
+          {[
+            {l:"This Month", v:total(monthExp), icon:"🗓️", c:"#6366F1"},
+            {l:"This Year",  v:total(yearExp),  icon:"📊",  c:"#22C55E"},
+            {l:"Today",      v:total(todayExp), icon:"📅",  c:"#F59E0B"},
+            {l:"Top Cat",    v:catTotals[0]?.total||0, icon:catTotals[0]?.icon||"🏆", c:"#EF4444", sub:catTotals[0]?.name},
+          ].map((s,i)=>(
+            <motion.div key={i} variants={gridItem} style={{
+              background:K.card, border:`1px solid ${K.border}`,
+              borderRadius:22, padding:"20px 16px",
+              position:"relative", overflow:"hidden",
+            }}>
+              <div style={{position:"absolute",top:-20,right:-20,width:80,height:80,borderRadius:"50%",background:`${s.c}10`}}/>
+              <div style={{
+                width:42,height:42,borderRadius:14,
+                background:`${s.c}18`,border:`1px solid ${s.c}30`,
+                display:"flex",alignItems:"center",justifyContent:"center",
+                fontSize:22,marginBottom:12,
+              }}>{s.icon}</div>
+              <div style={{fontSize:11,fontWeight:700,color:K.sub,letterSpacing:1}}>{s.l.toUpperCase()}</div>
+              <div style={{fontSize:22,fontWeight:900,color:s.c,marginTop:5,lineHeight:1}}>
+                <AnimatedNumber value={s.v} format={money} />
+              </div>
+              {s.sub && <div style={{fontSize:11,color:K.sub,marginTop:5}}>{s.sub}</div>}
+            </motion.div>
+          ))}
+        </motion.div>
+
+        {/* 6-month bar chart */}
+        <SecLabel icon="📊">6-MONTH TREND</SecLabel>
+        <Card style={{margin:"0 16px",padding:"18px 14px 12px"}}>
+          <ResponsiveContainer width="100%" height={200}>
+            <BarChart data={monthlyBar} margin={{top:0,right:0,left:-22,bottom:0}}>
+              <CartesianGrid strokeDasharray="3 3" stroke={K.border} vertical={false}/>
+              <XAxis dataKey="month" tick={{fill:K.sub,fontSize:12}} axisLine={false} tickLine={false}/>
+              <YAxis tick={{fill:K.sub,fontSize:10}} axisLine={false} tickLine={false}/>
+              <Tooltip
+                contentStyle={{background:K.card2,border:`1px solid ${K.border}`,color:K.text,borderRadius:12,fontSize:13}}
+                formatter={v=>[moneyFull(v),"Total"]}
+                cursor={{fill:K.accent+"12"}}
+              />
+              <Bar dataKey="v" radius={[8,8,2,2]}>
+                {monthlyBar.map((entry,i)=>(
+                  <Cell key={i} fill={i===monthlyBar.length-1 ? K.accent : K.accentL+"88"} />
+                ))}
+              </Bar>
+            </BarChart>
           </ResponsiveContainer>
         </Card>
-      </>}
 
-      <SecLabel>ALL CATEGORIES</SecLabel>
-      <Card style={{margin:"0 16px",padding:"4px 20px 8px"}}>
-        {catTotals.filter(c=>c.total>0).map((c, catIdx)=>{
-          const pct = catTotals[0].total>0 ? (c.total/catTotals[0].total)*100 : 0;
-          return (
-            <div key={c.id} style={{padding:"16px 0",borderBottom:`1px solid ${K.border}`}}>
-              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:12}}>
-                <div style={{display:"flex",alignItems:"center",gap:14}}>
-                  <span style={{fontSize:30}}>{c.icon}</span>
-                  <div>
-                    <div style={{fontSize:16,fontWeight:700,color:K.text}}>{c.name}</div>
-                    <div style={{fontSize:12,color:K.sub,marginTop:3}}>{expenses.filter(e=>e.category===c.id).length} transactions</div>
+        {/* Pie chart */}
+        {pieData.length>0 && (
+          <>
+            <SecLabel icon="🍩">BY CATEGORY</SecLabel>
+            <Card style={{margin:"0 16px",padding:"20px 16px 16px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:12}}>
+                <div style={{flex:"0 0 180px"}}>
+                  <PieChart width={180} height={180}>
+                    <Pie
+                      data={pieData} cx="50%" cy="50%"
+                      outerRadius={82} innerRadius={42}
+                      dataKey="total" nameKey="name"
+                      labelLine={false}
+                      label={renderPieLabel}
+                      paddingAngle={2}
+                    >
+                      {pieData.map(c=><Cell key={c.id} fill={c.color} stroke={K.card} strokeWidth={2}/>)}
+                    </Pie>
+                    <Tooltip formatter={v=>moneyFull(v)} contentStyle={{background:K.card2,border:`1px solid ${K.border}`,color:K.text,borderRadius:12,fontSize:13}}/>
+                  </PieChart>
+                </div>
+                <div style={{flex:1,display:"flex",flexDirection:"column",gap:8}}>
+                  {pieData.map(c=>(
+                    <div key={c.id} style={{display:"flex",alignItems:"center",gap:8}}>
+                      <div style={{width:10,height:10,borderRadius:3,background:c.color,flexShrink:0}}/>
+                      <div style={{fontSize:12,color:K.sub,flex:1,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.name}</div>
+                      <div style={{fontSize:12,fontWeight:700,color:c.color}}>{money(c.total)}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </Card>
+          </>
+        )}
+
+        {/* Category breakdown with animated bars */}
+        <SecLabel icon="🏷️">ALL CATEGORIES</SecLabel>
+        <Card style={{margin:"0 16px",padding:"4px 18px 8px"}}>
+          {catTotals.filter(c=>c.total>0).map((c,catIdx)=>{
+            const pct = grandTotal>0 ? (c.total/grandTotal)*100 : 0;
+            return (
+              <motion.div
+                key={c.id}
+                initial={{ opacity:0,x:-16 }}
+                animate={{ opacity:1,x:0 }}
+                transition={{ delay:catIdx*0.04, type:"spring",stiffness:340,damping:28 }}
+                style={{padding:"14px 0",borderBottom:`1px solid ${K.border}`}}
+              >
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:10}}>
+                  <div style={{display:"flex",alignItems:"center",gap:12}}>
+                    <div style={{
+                      width:42,height:42,borderRadius:14,
+                      background:`${c.color}18`,border:`1px solid ${c.color}28`,
+                      display:"flex",alignItems:"center",justifyContent:"center",fontSize:22,
+                    }}>{c.icon}</div>
+                    <div>
+                      <div style={{fontSize:15,fontWeight:700,color:K.text}}>{c.name}</div>
+                      <div style={{fontSize:11,color:K.sub,marginTop:2}}>{expenses.filter(e=>e.category===c.id).length} transactions</div>
+                    </div>
+                  </div>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontSize:17,fontWeight:900,color:c.color}}>{money(c.total)}</div>
+                    <div style={{fontSize:11,color:K.sub,marginTop:1}}>{pct.toFixed(1)}%</div>
                   </div>
                 </div>
-                <span style={{fontSize:18,fontWeight:900,color:c.color}}>{money(c.total)}</span>
-              </div>
-              {/* Animated progress bar */}
-              <div style={{height:10,background:K.card2,borderRadius:5,overflow:"hidden"}}>
-                <motion.div
-                  initial={{ width: 0 }}
-                  animate={{ width: `${pct}%` }}
-                  transition={{ duration: 0.7, ease: [0.16,1,0.3,1], delay: catIdx * 0.04 }}
-                  style={{height:"100%",background:c.color,borderRadius:5}}
-                />
-              </div>
-            </div>
-          );
-        })}
-        {catTotals.every(c=>c.total===0) && <div style={{padding:"40px 0",textAlign:"center",color:K.sub,fontSize:16}}>No data yet</div>}
-      </Card>
-    </div>
-  );
+                <div style={{height:6,background:K.card2,borderRadius:3,overflow:"hidden"}}>
+                  <motion.div
+                    initial={{ width:0 }}
+                    animate={{ width:`${pct}%` }}
+                    transition={{ duration:0.8, ease:[0.16,1,0.3,1], delay:catIdx*0.04 }}
+                    style={{height:"100%",background:`linear-gradient(90deg,${c.color}cc,${c.color})`,borderRadius:3}}
+                  />
+                </div>
+              </motion.div>
+            );
+          })}
+          {catTotals.every(c=>c.total===0) && (
+            <div style={{padding:"40px 0",textAlign:"center",color:K.sub,fontSize:15}}>No data yet — add your first expense!</div>
+          )}
+        </Card>
+      </div>
+    );
+  };
 
   // ════════════════════════════════════════════════════════
   //  PAGE: SETTINGS
   // ════════════════════════════════════════════════════════
   const PageSettings = () => (
-    <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:110}}>
+    <div style={{overflowY:"auto",height:"100%",WebkitOverflowScrolling:"touch",paddingBottom:120}}>
 
-      {/* Google Sheets */}
-      <SecLabel>GOOGLE SHEETS SYNC</SecLabel>
+      <SecLabel icon="☁️">GOOGLE SHEETS SYNC</SecLabel>
       <Card style={{margin:"0 16px",overflow:"hidden"}}>
         {gsOn ? (
           <>
-            <div style={{padding:"22px 22px",display:"flex",alignItems:"center",gap:18,borderBottom:`1px solid ${K.border}`,background:K.green+"0E"}}>
-              <div style={{width:60,height:60,borderRadius:20,background:K.green+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,flexShrink:0}}>✅</div>
-              <div style={{flex:1}}>
-                <div style={{fontSize:17,fontWeight:800,color:K.green}}>Connected</div>
-                <div style={{fontSize:12,color:K.sub,marginTop:4,wordBreak:"break-all",lineHeight:1.5}}>{scriptUrl.slice(0,55)}…</div>
+            <div style={{padding:"20px 20px",display:"flex",alignItems:"center",gap:16,borderBottom:`1px solid ${K.border}`,background:`${K.green}0C`}}>
+              <div style={{width:52,height:52,borderRadius:18,background:`${K.green}20`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:28,flexShrink:0}}>✅</div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{fontSize:16,fontWeight:800,color:K.green}}>Connected</div>
+                <div style={{fontSize:12,color:K.sub,marginTop:3,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{scriptUrl.slice(0,46)}…</div>
               </div>
             </div>
-            <div style={{padding:"18px 22px",display:"flex",gap:12}}>
-              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={restoreSheets} disabled={gsBusy} style={{flex:1,padding:"16px",borderRadius:18,border:`1.5px solid ${K.accent}`,background:K.accent+"22",color:K.accent,cursor:"pointer",fontSize:15,fontWeight:800}}>
-                {gsBusy?"Syncing…":"⬇️ Restore from Sheets"}
+            <div style={{padding:"16px 20px",display:"flex",gap:10}}>
+              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={restoreSheets} disabled={gsBusy} style={{flex:1,padding:"14px",borderRadius:16,border:`1.5px solid ${K.accent}`,background:`${K.accent}18`,color:K.accent,cursor:"pointer",fontSize:14,fontWeight:700}}>
+                {gsBusy?"Syncing…":"⬇️ Restore"}
               </motion.button>
-              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={disconnectGs} style={{flex:1,padding:"16px",borderRadius:18,border:`1.5px solid ${K.red}`,background:K.red+"22",color:K.red,cursor:"pointer",fontSize:15,fontWeight:800}}>
+              <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={disconnectGs} style={{flex:1,padding:"14px",borderRadius:16,border:`1.5px solid ${K.red}`,background:`${K.red}18`,color:K.red,cursor:"pointer",fontSize:14,fontWeight:700}}>
                 Disconnect
               </motion.button>
             </div>
           </>
         ) : (
-          <div style={{padding:"22px"}}>
-            <div style={{display:"flex",alignItems:"center",gap:18,marginBottom:20}}>
-              <div style={{width:60,height:60,borderRadius:20,background:K.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,flexShrink:0}}>📊</div>
-              <div>
-                <div style={{fontSize:17,fontWeight:800,color:K.text}}>Connect Google Sheets</div>
-                <div style={{fontSize:13,color:K.sub,marginTop:4}}>Auto-sync every expense</div>
-              </div>
-            </div>
-            <div style={{fontSize:12,fontWeight:800,color:K.sub,letterSpacing:.8,marginBottom:10}}>APPS SCRIPT URL</div>
+          <div style={{padding:"20px"}}>
+            <div style={{fontSize:12,fontWeight:700,color:K.sub,letterSpacing:.8,marginBottom:8}}>APPS SCRIPT URL</div>
             <input value={urlDraft} onChange={e=>setUrlDraft(e.target.value)}
               placeholder="https://script.google.com/macros/s/…/exec"
-              style={{width:"100%",padding:"18px",borderRadius:18,border:`1.5px solid ${K.border}`,background:K.card2,color:K.text,fontSize:15,boxSizing:"border-box",outline:"none",fontFamily:"inherit",marginBottom:16}}/>
-            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.97}} onClick={connectGs} style={{width:"100%",padding:"18px",borderRadius:18,border:"none",background:K.accent,color:"#FFF",cursor:"pointer",fontSize:17,fontWeight:900}}>
+              style={{width:"100%",padding:"16px",borderRadius:16,border:`1.5px solid ${K.border}`,background:K.card2,color:K.text,fontSize:14,boxSizing:"border-box",outline:"none",fontFamily:"inherit",marginBottom:14}}/>
+            <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.97}} onClick={connectGs} style={{width:"100%",padding:"16px",borderRadius:16,border:"none",background:K.accent,color:"#FFF",cursor:"pointer",fontSize:16,fontWeight:800,boxShadow:`0 6px 20px ${K.accent}40`}}>
               🔗 Connect
             </motion.button>
           </div>
         )}
       </Card>
 
-      {/* Preferences */}
-      <SecLabel>PREFERENCES</SecLabel>
+      <SecLabel icon="⚙️">PREFERENCES</SecLabel>
       <Card style={{margin:"0 16px",overflow:"hidden"}}>
         {/* Dark mode */}
-        <div style={{padding:"22px",borderBottom:`1px solid ${K.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{display:"flex",alignItems:"center",gap:18}}>
-            <div style={{width:60,height:60,borderRadius:20,background:K.accent+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>{dark?"🌙":"☀️"}</div>
+        <div style={{padding:"20px",borderBottom:`1px solid ${K.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{width:52,height:52,borderRadius:18,background:`${K.accent}18`,display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>{dark?"🌙":"☀️"}</div>
             <div>
-              <div style={{fontSize:17,fontWeight:700,color:K.text}}>Dark Mode</div>
-              <div style={{fontSize:13,color:K.sub,marginTop:3}}>Toggle app theme</div>
+              <div style={{fontSize:16,fontWeight:700,color:K.text}}>Dark Mode</div>
+              <div style={{fontSize:12,color:K.sub,marginTop:2}}>Toggle app theme</div>
             </div>
           </div>
           <motion.button
-            whileTap={{ scale: 0.9 }}
+            whileTap={{ scale:0.92 }}
             onClick={()=>{const nd=!dark;setDark(nd);try{localStorage.setItem("exp_cfg4",JSON.stringify({dark:nd,currency}));}catch{}}}
-            style={{width:62,height:36,borderRadius:18,border:"none",background:dark?K.accent:"#CBD5E1",cursor:"pointer",position:"relative",flexShrink:0}}
+            style={{width:58,height:32,borderRadius:16,border:"none",background:dark?K.accent:"#CBD5E1",cursor:"pointer",position:"relative",flexShrink:0,boxShadow:`0 2px 12px ${dark?K.accent+"50":"rgba(0,0,0,.12)"}`}}
           >
             <motion.div
-              animate={{ left: dark ? 30 : 4 }}
-              transition={{ type: "spring", stiffness: 400, damping: 28 }}
-              style={{width:28,height:28,borderRadius:14,background:"#FFF",position:"absolute",top:4,boxShadow:"0 2px 8px rgba(0,0,0,.25)"}}
+              animate={{ left: dark ? 28 : 4 }}
+              transition={{ type:"spring",stiffness:440,damping:28 }}
+              style={{width:24,height:24,borderRadius:12,background:"#FFF",position:"absolute",top:4,boxShadow:"0 2px 8px rgba(0,0,0,.25)"}}
             />
           </motion.button>
         </div>
+
         {/* Currency */}
-        <div style={{padding:"22px",borderBottom:`1px solid ${K.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{display:"flex",alignItems:"center",gap:18}}>
-            <div style={{width:60,height:60,borderRadius:20,background:"#F59E0B22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>💱</div>
+        <div style={{padding:"20px",borderBottom:`1px solid ${K.border}`,display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{width:52,height:52,borderRadius:18,background:"#F59E0B18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>💱</div>
             <div>
-              <div style={{fontSize:17,fontWeight:700,color:K.text}}>Currency</div>
-              <div style={{fontSize:13,color:K.sub,marginTop:3}}>All amounts display</div>
+              <div style={{fontSize:16,fontWeight:700,color:K.text}}>Currency</div>
+              <div style={{fontSize:12,color:K.sub,marginTop:2}}>Display format</div>
             </div>
           </div>
-          <div style={{display:"flex",gap:8}}>
+          <div style={{display:"flex",gap:6}}>
             {[{code:"DA",label:"DA"},{code:"USD",label:"$"},{code:"EUR",label:"€"}].map(c=>(
               <motion.button
                 key={c.code}
-                whileTap={{ scale: 0.88 }}
+                whileTap={{ scale:0.88 }}
                 onClick={()=>{setCurrency(c.code);try{localStorage.setItem("exp_cfg4",JSON.stringify({dark,currency:c.code}));}catch{}}}
-                style={{padding:"10px 18px",borderRadius:14,border:`2px solid ${currency===c.code?K.accent:K.border}`,background:currency===c.code?K.accent+"22":"transparent",color:currency===c.code?K.accent:K.sub,cursor:"pointer",fontSize:15,fontWeight:currency===c.code?800:500}}
-              >
-                {c.label} {c.code}
-              </motion.button>
+                style={{padding:"9px 14px",borderRadius:12,border:`2px solid ${currency===c.code?K.accent:K.border}`,background:currency===c.code?`${K.accent}22`:"transparent",color:currency===c.code?K.accent:K.sub,cursor:"pointer",fontSize:13,fontWeight:currency===c.code?800:500}}
+              >{c.label} {c.code}</motion.button>
             ))}
           </div>
         </div>
+
         {/* Export */}
-        <div style={{padding:"22px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
-          <div style={{display:"flex",alignItems:"center",gap:18}}>
-            <div style={{width:60,height:60,borderRadius:20,background:K.amber+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32}}>📤</div>
+        <div style={{padding:"20px",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <div style={{display:"flex",alignItems:"center",gap:16}}>
+            <div style={{width:52,height:52,borderRadius:18,background:"#F59E0B18",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26}}>📤</div>
             <div>
-              <div style={{fontSize:17,fontWeight:700,color:K.text}}>Export CSV</div>
-              <div style={{fontSize:13,color:K.sub,marginTop:3}}>Download all data</div>
+              <div style={{fontSize:16,fontWeight:700,color:K.text}}>Export CSV</div>
+              <div style={{fontSize:12,color:K.sub,marginTop:2}}>Download all data</div>
             </div>
           </div>
           <motion.button
-            whileHover={{ scale: 1.04 }}
-            whileTap={{ scale: 0.93 }}
+            whileHover={{ scale:1.04 }}
+            whileTap={{ scale:0.93 }}
             onClick={()=>{
               const h="ID,Date,Category,Name,Amount,Notes\n";
               const r=expenses.map(e=>[e.id,e.date,getCat(e.category).name,`"${e.name}"`,e.amount,`"${e.notes||""}"`].join(",")).join("\n");
               const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([h+r],{type:"text/csv"}));a.download="expenses.csv";a.click();
-              toast$("Exported ✓");
+              toast$("Exported successfully",false,"📊");
             }}
-            style={{padding:"14px 24px",borderRadius:18,border:"none",background:K.amber+"22",color:K.amber,cursor:"pointer",fontSize:15,fontWeight:800}}
-          >
-            Export
-          </motion.button>
+            style={{padding:"12px 20px",borderRadius:14,border:"none",background:"#F59E0B18",color:K.amber,cursor:"pointer",fontSize:14,fontWeight:800}}
+          >Export</motion.button>
         </div>
       </Card>
 
-      {/* Install hint */}
-      <SecLabel>INSTALL AS APP</SecLabel>
-      <Card style={{margin:"0 16px",padding:"22px"}}>
-        <div style={{display:"flex",gap:18,alignItems:"flex-start"}}>
-          <div style={{width:60,height:60,borderRadius:20,background:"#06B6D4"+"22",display:"flex",alignItems:"center",justifyContent:"center",fontSize:32,flexShrink:0}}>📱</div>
+      <SecLabel icon="📱">INSTALL AS APP</SecLabel>
+      <Card style={{margin:"0 16px",padding:"20px"}}>
+        <div style={{display:"flex",gap:16,alignItems:"flex-start"}}>
+          <div style={{width:52,height:52,borderRadius:18,background:"#06B6D418",display:"flex",alignItems:"center",justifyContent:"center",fontSize:26,flexShrink:0}}>📱</div>
           <div>
-            <div style={{fontSize:17,fontWeight:800,color:K.text,marginBottom:10}}>Install on Android</div>
-            <div style={{fontSize:14,color:K.sub,lineHeight:1.8}}>
+            <div style={{fontSize:16,fontWeight:800,color:K.text,marginBottom:10}}>Install on Android</div>
+            <div style={{fontSize:13,color:K.sub,lineHeight:1.9}}>
               1. Open in Chrome on Android{"\n"}
-              2. Tap the menu ⋮ (3 dots){"\n"}
-              3. Tap <b style={{color:K.text}}>"Add to Home screen"</b>{"\n"}
-              4. The app opens fullscreen, no browser bar!
+              2. Tap menu ⋮ → "Add to Home screen"{"\n"}
+              3. App opens fullscreen, no browser bar!
             </div>
           </div>
         </div>
       </Card>
 
-      {/* Data summary */}
-      <SecLabel>YOUR DATA</SecLabel>
-      <Card style={{margin:"0 16px",padding:"4px 22px"}}>
+      <SecLabel icon="🗄️">YOUR DATA</SecLabel>
+      <Card style={{margin:"0 16px",padding:"4px 20px"}}>
         {[
-          {l:"Total expenses",   v:expenses.length+" items"},
+          {l:"Total expenses",   v:`${expenses.length} items`},
           {l:"Total amount",     v:moneyFull(total(expenses))},
           {l:"Categories used",  v:`${catTotals.filter(c=>c.total>0).length} of ${CATS.length}`},
         ].map((r,i)=>(
-          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"20px 0",borderBottom:i<2?`1px solid ${K.border}`:"none"}}>
-            <span style={{fontSize:16,color:K.sub}}>{r.l}</span>
-            <span style={{fontSize:16,fontWeight:800,color:K.text}}>{r.v}</span>
+          <div key={i} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"18px 0",borderBottom:i<2?`1px solid ${K.border}`:"none"}}>
+            <span style={{fontSize:14,color:K.sub}}>{r.l}</span>
+            <span style={{fontSize:15,fontWeight:800,color:K.text}}>{r.v}</span>
           </div>
         ))}
       </Card>
     </div>
   );
 
-  // ── Nav ───────────────────────────────────────────────────
+  // ── Nav config ────────────────────────────────────────────
   const NAV = [
     {id:"home",    icon:"🏠", label:"Home"},
     {id:"calendar",icon:"📅", label:"Calendar"},
@@ -1115,21 +1416,33 @@ export default function App() {
     {id:"settings",icon:"⚙️", label:"Settings"},
   ];
 
-  const titles = {home:"Expenses Tracker",calendar:"Calendar",history:"History",reports:"Reports",settings:"Settings"};
+  const titles = {
+    home:"Stable Ledger", calendar:"Calendar",
+    history:"History", reports:"Reports", settings:"Settings"
+  };
 
   const renderPage = () => {
-    if (loading) return <div style={{display:"flex",alignItems:"center",justifyContent:"center",height:"100%",color:K.sub,fontSize:20}}>Loading…</div>;
+    if (loading) return (
+      <div style={{padding:"20px 16px"}}>
+        {[1,2,3].map(i=>(
+          <div key={i} style={{marginBottom:16}}>
+            <Skeleton h={28} r={14} style={{marginBottom:8,width:"60%"}}/>
+            <Skeleton h={100} r={20}/>
+          </div>
+        ))}
+      </div>
+    );
     switch(page) {
       case "home":     return <PageHome/>;
       case "calendar": return <PageCalendar/>;
       case "history":  return <PageHistory/>;
       case "reports":  return <PageReports/>;
       case "settings": return <PageSettings/>;
-      default:         return null;
+      default: return null;
     }
   };
 
-  // ── Expense drawer (period detail) ────────────────────────
+  // ── Expense drawer ─────────────────────────────────────────
   const drawerGrouped = {};
   if (drawer) {
     [...(drawer.exps||[])].sort((a,b)=>new Date(b.date)-new Date(a.date)).forEach(ex=>{
@@ -1146,41 +1459,37 @@ export default function App() {
       width:"100%", maxWidth:480, margin:"0 auto",
       height:"100dvh", display:"flex", flexDirection:"column",
       background:K.bg,
-      backgroundImage:`radial-gradient(circle at 20% 10%, rgba(99,102,241,.22) 0%, transparent 26%), radial-gradient(circle at 75% 15%, rgba(16,185,129,.16) 0%, transparent 28%), radial-gradient(circle at 80% 80%, rgba(236,72,153,.12) 0%, transparent 24%)`,
       fontFamily:"'DM Sans','SF Pro Display',system-ui,sans-serif",
       color:K.text, position:"relative", overflow:"hidden",
     }}>
-      {/* ── Ambient blobs ─────────────────────────────────── */}
-      <div style={{position:"absolute", inset:0, zIndex:0, pointerEvents:"none", overflow:"hidden"}}>
-        <div style={{position:"absolute",top:"10%",left:"-12%",width:260,height:260,borderRadius:"50%",background:"rgba(99,102,241,.22)",filter:"blur(40px)",animation:"blobMove 18s ease-in-out infinite alternate"}}/>
-        <div style={{position:"absolute",top:"20%",right:"-8%",width:200,height:200,borderRadius:"50%",background:"rgba(16,185,129,.18)",filter:"blur(40px)",animation:"blobMoveAlt 22s ease-in-out infinite alternate"}}/>
-        <div style={{position:"absolute",bottom:"8%",left:"25%",width:220,height:220,borderRadius:"50%",background:"rgba(236,72,153,.14)",filter:"blur(45px)",animation:"blobMove 20s ease-in-out infinite alternate-reverse"}}/>
-        {Array.from({length:10}).map((_,i)=>(
-          <div key={i} style={{position:"absolute",width:8,height:8,borderRadius:"50%",background:"rgba(255,255,255,.22)",top:`${10+(i*8)}%`,left:`${15+(i*7)}%`,transform:"translate(-50%,-50%)",animation:`floatDots ${10+i*1.5}s ease-in-out ${i*0.4}s infinite`}}/>
-        ))}
+
+      {/* ── Ambient background ──────────────────────────── */}
+      <div style={{position:"absolute",inset:0,zIndex:0,pointerEvents:"none",overflow:"hidden"}}>
+        <div style={{position:"absolute",top:"-5%",left:"-15%",width:320,height:320,borderRadius:"50%",background:dark?"rgba(99,102,241,.14)":"rgba(99,102,241,.08)",filter:"blur(50px)",animation:"blobMove 22s ease-in-out infinite alternate"}}/>
+        <div style={{position:"absolute",top:"25%",right:"-10%",width:260,height:260,borderRadius:"50%",background:dark?"rgba(16,185,129,.1)":"rgba(16,185,129,.07)",filter:"blur(50px)",animation:"blobMoveAlt 28s ease-in-out infinite alternate"}}/>
+        <div style={{position:"absolute",bottom:"12%",left:"20%",width:280,height:280,borderRadius:"50%",background:dark?"rgba(236,72,153,.09)":"rgba(236,72,153,.05)",filter:"blur(55px)",animation:"blobMove 24s ease-in-out infinite alternate-reverse"}}/>
       </div>
 
-      <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",minHeight:"100%"}}>
+      <div style={{position:"relative",zIndex:1,display:"flex",flexDirection:"column",height:"100%"}}>
 
-        {/* ── Top bar ──────────────────────────────────────── */}
-        <motion.div
-          layout
-          style={{
-            background:K.card, borderBottom:`1px solid ${K.border}`,
-            padding:"18px 22px 16px",
-            paddingTop:"max(18px, env(safe-area-inset-top,18px))",
-            flexShrink:0,
-            display:"flex", justifyContent:"space-between", alignItems:"center",
-          }}
-        >
+        {/* ── Top bar ──────────────────────────────────── */}
+        <div style={{
+          background:dark?"rgba(13,21,37,0.88)":"rgba(255,255,255,0.9)",
+          backdropFilter:"blur(20px)",
+          borderBottom:`1px solid ${K.border}`,
+          padding:"18px 20px 14px",
+          paddingTop:"max(18px, env(safe-area-inset-top,18px))",
+          flexShrink:0,
+          display:"flex", justifyContent:"space-between", alignItems:"center",
+        }}>
           <AnimatePresence mode="wait">
             <motion.div
               key={page}
-              initial={{ opacity: 0, y: -8 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: 8 }}
-              transition={{ duration: 0.18 }}
-              style={{fontSize:21,fontWeight:900,color:K.text,letterSpacing:-.3}}
+              initial={{ opacity:0,y:-10 }}
+              animate={{ opacity:1,y:0 }}
+              exit={{ opacity:0,y:10 }}
+              transition={{ duration:0.2 }}
+              style={{fontSize:20,fontWeight:900,color:K.text,letterSpacing:-.4}}
             >
               {titles[page]}
             </motion.div>
@@ -1188,19 +1497,28 @@ export default function App() {
           <div style={{display:"flex",alignItems:"center",gap:10}}>
             {gsOn && (
               <motion.div
-                initial={{ scale: 0 }}
-                animate={{ scale: 1 }}
-                style={{display:"flex",alignItems:"center",gap:6,background:K.green+"18",borderRadius:20,padding:"5px 12px"}}
+                initial={{ scale:0,opacity:0 }}
+                animate={{ scale:1,opacity:1 }}
+                transition={springFast}
+                style={{display:"flex",alignItems:"center",gap:5,background:`${K.green}18`,borderRadius:20,padding:"5px 11px",border:`1px solid ${K.green}28`}}
               >
-                <div style={{width:8,height:8,borderRadius:4,background:K.green}}/>
-                <span style={{fontSize:12,fontWeight:700,color:K.green}}>Sheets</span>
+                <motion.div
+                  animate={{ scale:[1,1.5,1],opacity:[1,0.5,1] }}
+                  transition={{ duration:2.4,repeat:Infinity,ease:"easeInOut" }}
+                  style={{width:6,height:6,borderRadius:3,background:K.green}}
+                />
+                <span style={{fontSize:11,fontWeight:700,color:K.green}}>Sheets</span>
               </motion.div>
             )}
-            <div style={{fontSize:28}}>💼</div>
+            <div style={{
+              width:36,height:36,borderRadius:12,
+              background:K.accent+"20",border:`1px solid ${K.accent}30`,
+              display:"flex",alignItems:"center",justifyContent:"center",fontSize:18,
+            }}>💼</div>
           </div>
-        </motion.div>
+        </div>
 
-        {/* ── Page content with slide transitions ───────────── */}
+        {/* ── Page content ─────────────────────────────── */}
         <div style={{flex:1,overflow:"hidden",position:"relative"}}>
           <AnimatePresence mode="wait" custom={direction}>
             <motion.div
@@ -1218,48 +1536,46 @@ export default function App() {
           </AnimatePresence>
         </div>
 
-        {/* ── FAB with pulse ring ───────────────────────────── */}
+        {/* ── FAB ──────────────────────────────────────── */}
         <AnimatePresence>
           {(page==="home"||page==="calendar") && (
             <motion.div
               key="fab"
-              initial={{ scale: 0, rotate: -180 }}
-              animate={{ scale: 1, rotate: 0 }}
-              exit={{ scale: 0, rotate: 180 }}
-              transition={{ type: "spring", stiffness: 340, damping: 22 }}
-              style={{ position:"absolute", bottom:90, right:20, zIndex:50 }}
+              initial={{ scale:0,rotate:-180,opacity:0 }}
+              animate={{ scale:1,rotate:0,opacity:1 }}
+              exit={{ scale:0,rotate:180,opacity:0 }}
+              transition={{ type:"spring",stiffness:360,damping:24 }}
+              style={{ position:"absolute",bottom:88,right:20,zIndex:50 }}
             >
-              {/* Pulse ring */}
               <motion.div
-                animate={{ scale: [1, 1.6, 1.6], opacity: [0.55, 0.15, 0] }}
-                transition={{ duration: 2.2, repeat: Infinity, ease: "easeOut" }}
-                style={{
-                  position:"absolute", inset:-8, borderRadius:"50%",
-                  background:"rgba(99,102,241,0.5)", pointerEvents:"none",
-                }}
+                animate={{ scale:[1,1.7,1.7],opacity:[0.5,0.12,0] }}
+                transition={{ duration:2.4,repeat:Infinity,ease:"easeOut" }}
+                style={{position:"absolute",inset:-10,borderRadius:"50%",background:`${K.accent}60`,pointerEvents:"none"}}
               />
               <motion.button
                 onClick={()=>openAdd(CATS[0])}
-                whileHover={{ scale: 1.12 }}
-                whileTap={{ scale: 0.88, rotate: 45 }}
-                transition={{ type: "spring", stiffness: 400, damping: 18 }}
+                whileHover={{ scale:1.1 }}
+                whileTap={{ scale:0.88,rotate:45 }}
+                transition={{ type:"spring",stiffness:420,damping:20 }}
                 style={{
-                  width:68, height:68, borderRadius:34, border:"none",
-                  background:"linear-gradient(145deg,#6366F1,#7C3AED)",
-                  color:"#FFF", fontSize:36, cursor:"pointer",
-                  boxShadow:"0 8px 30px rgba(99,102,241,.6)",
-                  display:"flex", alignItems:"center", justifyContent:"center",
-                  lineHeight:1, position:"relative",
+                  width:64,height:64,borderRadius:32,border:"none",
+                  background:`linear-gradient(145deg,${K.accent},#7C3AED)`,
+                  color:"#FFF",fontSize:34,cursor:"pointer",
+                  boxShadow:`0 10px 36px ${K.accent}60, 0 4px 12px rgba(0,0,0,.3)`,
+                  display:"flex",alignItems:"center",justifyContent:"center",
+                  lineHeight:1,position:"relative",
                 }}>+</motion.button>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ── Bottom navigation ─────────────────────────────── */}
+        {/* ── Bottom navigation ────────────────────────── */}
         <div style={{
-          background:K.card, borderTop:`1px solid ${K.border}`,
-          display:"flex", flexShrink:0,
-          paddingBottom:"max(12px, env(safe-area-inset-bottom,12px))",
+          background:dark?"rgba(13,21,37,0.92)":"rgba(255,255,255,0.94)",
+          backdropFilter:"blur(24px)",
+          borderTop:`1px solid ${K.border}`,
+          display:"flex",flexShrink:0,
+          paddingBottom:"max(10px, env(safe-area-inset-bottom,10px))",
         }}>
           {NAV.map(n=>{
             const active = page===n.id;
@@ -1267,31 +1583,45 @@ export default function App() {
               <motion.button
                 key={n.id}
                 onClick={()=>navigate(n.id)}
-                whileTap={{ scale: 0.88 }}
+                whileTap={{ scale:0.86 }}
                 style={{
-                  flex:1, padding:"14px 4px 10px",
-                  border:"none", background:"transparent",
-                  cursor:"pointer", display:"flex",
-                  flexDirection:"column", alignItems:"center", gap:5,
+                  flex:1,padding:"12px 4px 8px",
+                  border:"none",background:"transparent",
+                  cursor:"pointer",display:"flex",
+                  flexDirection:"column",alignItems:"center",gap:4,
                   position:"relative",
                 }}
               >
-                <motion.div
-                  animate={{ scale: active ? 1.18 : 1 }}
-                  transition={{ type: "spring", stiffness: 400, damping: 20 }}
-                  style={{fontSize:24}}
-                >
-                  {n.icon}
-                </motion.div>
-                <div style={{fontSize:11,fontWeight:active?800:500,color:active?K.accent:K.sub}}>
-                  {n.label}
-                </div>
-                {/* Animated active pill — slides between tabs */}
+                {/* Active background pill */}
                 {active && (
                   <motion.div
-                    layoutId="nav-pill"
-                    style={{width:24,height:3,borderRadius:2,background:K.accent,position:"absolute",bottom:0}}
-                    transition={{ type: "spring", stiffness: 380, damping: 30 }}
+                    layoutId="nav-bg"
+                    style={{
+                      position:"absolute",top:6,left:"50%",
+                      width:44,height:44,borderRadius:14,
+                      background:`${K.accent}18`,
+                      transform:"translateX(-50%)",
+                    }}
+                    transition={{ type:"spring",stiffness:380,damping:30 }}
+                  />
+                )}
+                <motion.div
+                  animate={{ scale:active?1.18:1,y:active?-1:0 }}
+                  transition={{ type:"spring",stiffness:420,damping:22 }}
+                  style={{fontSize:22,lineHeight:1,position:"relative",zIndex:1}}
+                >{n.icon}</motion.div>
+                <div style={{
+                  fontSize:10,fontWeight:active?800:500,
+                  color:active?K.accent:K.sub,
+                  letterSpacing:.3,
+                  position:"relative",zIndex:1,
+                }}>{n.label}</div>
+                {/* Sliding underline indicator */}
+                {active && (
+                  <motion.div
+                    layoutId="nav-line"
+                    style={{width:22,height:3,borderRadius:2,background:K.accent,position:"absolute",bottom:0}}
+                    transition={{ type:"spring",stiffness:400,damping:30 }}
                   />
                 )}
               </motion.button>
@@ -1299,173 +1629,207 @@ export default function App() {
           })}
         </div>
 
-        {/* ── ADD / EDIT MODAL — spring bottom sheet ─────────── */}
+        {/* ── ADD / EDIT MODAL ─────────────────────────── */}
         <AnimatePresence>
           {modal && selCat && (
             <motion.div
               key="modal"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              style={{position:"absolute",inset:0,zIndex:100,display:"flex",flexDirection:"column"}}
+              initial={{ opacity:0 }}
+              animate={{ opacity:1 }}
+              exit={{ opacity:0 }}
+              style={{position:"absolute",inset:0,zIndex:200,display:"flex",flexDirection:"column"}}
             >
               <motion.div
                 onClick={closeModal}
-                style={{flex:"0 0 60px",background:"rgba(0,0,0,.7)",backdropFilter:"blur(10px)"}}
+                style={{flex:"0 0 56px",background:"rgba(0,0,0,.72)",backdropFilter:"blur(12px)"}}
               />
               <motion.div
-                initial={{ y: "100%" }}
-                animate={{ y: 0 }}
-                exit={{ y: "100%" }}
+                initial={{ y:"100%" }}
+                animate={{ y:0 }}
+                exit={{ y:"100%" }}
                 transition={springSheet}
-                style={{flex:1,background:K.card,borderRadius:"32px 32px 0 0",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 -12px 60px rgba(0,0,0,.7)"}}
+                style={{
+                  flex:1,background:K.card,
+                  borderRadius:"32px 32px 0 0",
+                  display:"flex",flexDirection:"column",
+                  overflow:"hidden",
+                  boxShadow:"0 -20px 80px rgba(0,0,0,.7)",
+                  border:`1px solid ${K.border}`,
+                  borderBottom:"none",
+                }}
               >
                 {/* Handle */}
-                <div style={{display:"flex",justifyContent:"center",padding:"16px 0 8px",flexShrink:0}}>
-                  <div style={{width:48,height:5,borderRadius:3,background:K.border}}/>
+                <div style={{display:"flex",justifyContent:"center",padding:"14px 0 6px",flexShrink:0}}>
+                  <div style={{width:42,height:4,borderRadius:2,background:K.border2}}/>
                 </div>
+
                 {/* Modal header */}
-                <div style={{padding:"6px 24px 20px",borderBottom:`1px solid ${K.border}`,flexShrink:0,display:"flex",alignItems:"center",gap:18}}>
+                <div style={{padding:"4px 22px 18px",borderBottom:`1px solid ${K.border}`,flexShrink:0,display:"flex",alignItems:"center",gap:16}}>
                   <motion.div
                     key={selCat.id}
-                    initial={{ scale: 0.7, rotate: -20 }}
-                    animate={{ scale: 1, rotate: 0 }}
-                    transition={{ type: "spring", stiffness: 380, damping: 20 }}
-                    style={{width:66,height:66,borderRadius:24,background:selCat.color+"25",display:"flex",alignItems:"center",justifyContent:"center",fontSize:36,flexShrink:0}}
-                  >
-                    {selCat.icon}
-                  </motion.div>
+                    initial={{ scale:0.6,rotate:-20 }}
+                    animate={{ scale:1,rotate:0 }}
+                    transition={{ type:"spring",stiffness:420,damping:22 }}
+                    style={{
+                      width:60,height:60,borderRadius:20,
+                      background:`linear-gradient(145deg,${selCat.color}28,${selCat.color}14)`,
+                      border:`1.5px solid ${selCat.color}40`,
+                      display:"flex",alignItems:"center",justifyContent:"center",
+                      fontSize:32,flexShrink:0,
+                      boxShadow:`0 6px 20px ${selCat.color}20`,
+                    }}
+                  >{selCat.icon}</motion.div>
                   <div style={{flex:1}}>
-                    <div style={{fontSize:21,fontWeight:900,color:K.text}}>{editId?"Edit Expense":`Add ${selCat.name}`}</div>
-                    <div style={{fontSize:14,color:K.sub,marginTop:4}}>Category: {selCat.name}</div>
+                    <div style={{fontSize:20,fontWeight:900,color:K.text}}>{editId?"Edit Expense":`Add ${selCat.name}`}</div>
+                    <div style={{fontSize:13,color:K.sub,marginTop:3}}>Category: {selCat.name}</div>
                   </div>
                   <motion.button
                     onClick={closeModal}
-                    whileHover={{ scale: 1.1, rotate: 90 }}
-                    whileTap={{ scale: 0.88 }}
-                    transition={{ type: "spring", stiffness: 400, damping: 18 }}
-                    style={{width:48,height:48,borderRadius:16,border:`1px solid ${K.border}`,background:K.card2,color:K.sub,cursor:"pointer",fontSize:22,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
+                    whileHover={{ scale:1.1,rotate:90 }}
+                    whileTap={{ scale:0.88 }}
+                    transition={springFast}
+                    style={{width:44,height:44,borderRadius:14,border:`1px solid ${K.border}`,background:K.card2,color:K.sub,cursor:"pointer",fontSize:20,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}
                   >✕</motion.button>
                 </div>
 
                 {/* Category scroll */}
                 {!editId && (
-                  <div style={{padding:"14px 20px 0",overflowX:"auto",display:"flex",gap:12,WebkitOverflowScrolling:"touch",flexShrink:0}}>
+                  <div style={{padding:"12px 18px 0",overflowX:"auto",display:"flex",gap:10,WebkitOverflowScrolling:"touch",flexShrink:0}}>
                     {CATS.map(c=>(
                       <motion.button
                         key={c.id}
                         onClick={()=>setSelCat(c)}
-                        whileHover={{ scale: 1.06 }}
-                        whileTap={{ scale: 0.88 }}
-                        animate={c.id===selCat.id ? { scale: [1,1.14,1], transition: { duration: 0.28 } } : { scale: 1 }}
+                        whileHover={{ scale:1.06,y:-2 }}
+                        whileTap={{ scale:0.88 }}
+                        animate={c.id===selCat.id ? { scale:[1,1.12,1],transition:{duration:0.25} } : { scale:1 }}
                         style={{
-                          flexShrink:0, display:"flex", flexDirection:"column",
-                          alignItems:"center", gap:6, padding:"14px 16px",
-                          borderRadius:20, border:`2.5px solid ${c.id===selCat.id?c.color:K.border}`,
-                          background:c.id===selCat.id?c.color+"22":K.card2,
+                          flexShrink:0,display:"flex",flexDirection:"column",
+                          alignItems:"center",gap:5,padding:"12px 14px",
+                          borderRadius:18,
+                          border:`2px solid ${c.id===selCat.id?c.color:K.border}`,
+                          background:c.id===selCat.id ? `${c.color}20` : K.card2,
                           cursor:"pointer",
                         }}
                       >
-                        <span style={{fontSize:30}}>{c.icon}</span>
-                        <span style={{fontSize:11,fontWeight:700,color:c.id===selCat.id?c.color:K.sub,whiteSpace:"nowrap"}}>{c.name}</span>
+                        <span style={{fontSize:26}}>{c.icon}</span>
+                        <span style={{fontSize:10,fontWeight:700,color:c.id===selCat.id?c.color:K.sub,whiteSpace:"nowrap"}}>{c.name}</span>
                       </motion.button>
                     ))}
                   </div>
                 )}
 
                 {/* Fields */}
-                <div style={{flex:1,overflowY:"auto",padding:"20px 24px 28px",WebkitOverflowScrolling:"touch"}}>
+                <div style={{flex:1,overflowY:"auto",padding:"18px 22px 28px",WebkitOverflowScrolling:"touch"}}>
                   {[
-                    {label:"EXPENSE NAME", key:"name",   type:"text",   ph:`e.g. ${selCat.id==="food"?"Lunch":"Description"}`},
+                    {label:"EXPENSE NAME",      key:"name",   type:"text",   ph:`e.g. ${selCat.id==="food"?"Lunch":"Description"}`},
                     {label:`AMOUNT (${currency})`, key:"amount", type:"number", ph:"0.00"},
-                    {label:"DATE",         key:"date",   type:"date",   ph:""},
-                    {label:"NOTES",        key:"notes",  type:"text",   ph:"Optional details…"},
+                    {label:"DATE",               key:"date",   type:"date",   ph:""},
+                    {label:"NOTES",              key:"notes",  type:"text",   ph:"Optional details…"},
                   ].map((f,fi)=>(
                     <motion.div
                       key={f.key}
-                      initial={{ opacity: 0, y: 12 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: fi * 0.06, type: "spring", stiffness: 320, damping: 26 }}
-                      style={{marginBottom:20}}
+                      initial={{ opacity:0,y:14 }}
+                      animate={{ opacity:1,y:0 }}
+                      transition={{ delay:fi*0.06,type:"spring",stiffness:340,damping:26 }}
+                      style={{marginBottom:18}}
                     >
-                      <div style={{fontSize:12,fontWeight:800,color:K.sub,letterSpacing:.8,marginBottom:10}}>{f.label}</div>
-                      <input type={f.type} value={form[f.key]} placeholder={f.ph}
+                      <div style={{fontSize:11,fontWeight:800,color:K.sub,letterSpacing:1,marginBottom:8}}>{f.label}</div>
+                      <input
+                        type={f.type}
+                        value={form[f.key]}
+                        placeholder={f.ph}
+                        onFocus={()=>setFocusedInput(f.key)}
+                        onBlur={()=>setFocusedInput(null)}
                         onChange={e=>setForm({...form,[f.key]:f.key==="name"?capitalizeFirst(e.target.value):e.target.value})}
                         style={{
-                          width:"100%", padding:"18px 18px",
-                          borderRadius:18, border:`1.5px solid ${K.border}`,
-                          background:K.card2, color:K.text,
-                          fontSize:17, boxSizing:"border-box",
-                          outline:"none", fontFamily:"inherit", fontWeight:500,
-                        }}/>
+                          width:"100%",padding:"16px 18px",
+                          borderRadius:16,
+                          border:`1.5px solid ${focusedInput===f.key?selCat.color:K.border}`,
+                          background:K.card2,color:K.text,
+                          fontSize:16,boxSizing:"border-box",
+                          outline:"none",fontFamily:"inherit",fontWeight:500,
+                          transition:"border-color 0.2s",
+                          boxShadow:focusedInput===f.key?`0 0 0 4px ${selCat.color}18`:"none",
+                        }}
+                      />
                     </motion.div>
                   ))}
-                  <motion.button
+
+                  <RippleButton
                     onClick={saveExp}
                     disabled={saving}
-                    whileHover={saving ? {} : { scale: 1.02 }}
-                    whileTap={saving ? {} : { scale: 0.97 }}
+                    whileHover={saving?{}:{scale:1.02,y:-1}}
+                    whileTap={saving?{}:{scale:0.97}}
                     style={{
-                      width:"100%", padding:"20px",
-                      borderRadius:20, border:"none",
-                      background:selCat.color, color:"#FFF",
-                      fontSize:18, fontWeight:900, cursor:saving?"default":"pointer",
-                      opacity:saving?0.6:1,
-                      marginTop:6, boxShadow:`0 6px 24px ${selCat.color}55`,
+                      width:"100%",padding:"18px",
+                      borderRadius:18,border:"none",
+                      background:saving?"#888":`linear-gradient(135deg,${selCat.color},${selCat.color}dd)`,
+                      color:"#FFF",fontSize:17,fontWeight:800,
+                      cursor:saving?"default":"pointer",
+                      marginTop:4,
+                      boxShadow:saving?"none":`0 8px 28px ${selCat.color}45`,
+                      transition:"background 0.2s",
                     }}
                   >
                     {saving ? "Saving…" : (editId ? "Update Expense ✓" : "Save Expense ✓")}
-                  </motion.button>
+                  </RippleButton>
                 </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ── DELETE CONFIRM — spring ─────────────────────────── */}
+        {/* ── DELETE CONFIRM ────────────────────────────── */}
         <AnimatePresence>
           {delId && (
             <motion.div
               key="delete-confirm"
-              initial={{ opacity: 0 }}
-              animate={{ opacity: 1 }}
-              exit={{ opacity: 0 }}
-              style={{position:"absolute",inset:0,background:"rgba(0,0,0,.75)",zIndex:400,display:"flex",alignItems:"flex-end"}}
+              initial={{ opacity:0 }}
+              animate={{ opacity:1 }}
+              exit={{ opacity:0 }}
+              style={{position:"absolute",inset:0,background:"rgba(0,0,0,.78)",zIndex:400,display:"flex",alignItems:"flex-end"}}
             >
               <motion.div
-                initial={{ y: 80, opacity: 0 }}
-                animate={{ y: 0, opacity: 1 }}
-                exit={{ y: 80, opacity: 0 }}
-                transition={{ type: "spring", stiffness: 320, damping: 28 }}
-                style={{width:"100%",background:K.card,borderRadius:"32px 32px 0 0",padding:"30px 24px 50px",boxShadow:"0 -12px 60px rgba(0,0,0,.6)"}}
+                initial={{ y:100,opacity:0 }}
+                animate={{ y:0,opacity:1 }}
+                exit={{ y:100,opacity:0 }}
+                transition={{ type:"spring",stiffness:340,damping:30 }}
+                style={{
+                  width:"100%",background:K.card,
+                  borderRadius:"32px 32px 0 0",
+                  padding:"28px 22px 48px",
+                  boxShadow:"0 -16px 60px rgba(0,0,0,.6)",
+                  border:`1px solid ${K.border}`,
+                  borderBottom:"none",
+                }}
               >
                 <div style={{textAlign:"center",marginBottom:28}}>
                   <motion.div
-                    animate={{ rotate: [0, -12, 12, -8, 8, 0] }}
-                    transition={{ delay: 0.15, duration: 0.5 }}
-                    style={{fontSize:64,marginBottom:16}}
+                    animate={{ rotate:[0,-14,14,-8,8,0] }}
+                    transition={{ delay:0.18,duration:0.5 }}
+                    style={{fontSize:60,marginBottom:14}}
                   >🗑️</motion.div>
                   <div style={{fontSize:22,fontWeight:900,color:K.text}}>Delete this expense?</div>
-                  <div style={{fontSize:16,color:K.sub,marginTop:8}}>This cannot be undone.</div>
+                  <div style={{fontSize:15,color:K.sub,marginTop:8}}>This action cannot be undone.</div>
                 </div>
-                <div style={{display:"flex",gap:14}}>
-                  <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={()=>setDelId(null)} style={{flex:1,padding:"20px",borderRadius:20,border:`1.5px solid ${K.border}`,background:K.card2,color:K.text,fontSize:17,fontWeight:800,cursor:"pointer"}}>Cancel</motion.button>
-                  <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={()=>delExp(delId)} style={{flex:1,padding:"20px",borderRadius:20,border:"none",background:K.red,color:"#FFF",fontSize:17,fontWeight:900,cursor:"pointer",boxShadow:`0 6px 24px ${K.red}55`}}>Delete</motion.button>
+                <div style={{display:"flex",gap:12}}>
+                  <motion.button whileHover={{scale:1.02}} whileTap={{scale:0.96}} onClick={()=>setDelId(null)} style={{flex:1,padding:"18px",borderRadius:18,border:`1.5px solid ${K.border}`,background:K.card2,color:K.text,fontSize:16,fontWeight:700,cursor:"pointer"}}>Cancel</motion.button>
+                  <RippleButton onClick={()=>delExp(delId)} whileHover={{scale:1.02}} whileTap={{scale:0.96}} style={{flex:1,padding:"18px",borderRadius:18,border:"none",background:K.red,color:"#FFF",fontSize:16,fontWeight:800,cursor:"pointer",boxShadow:`0 6px 24px ${K.red}50`}}>Delete</RippleButton>
                 </div>
               </motion.div>
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* ── PERIOD DETAIL BOTTOM SHEET ─────────────────────── */}
+        {/* ── PERIOD DETAIL DRAWER ──────────────────────── */}
         <BottomSheet show={!!drawer} onClose={()=>setDrawer(null)} title={drawer?.title} sub={drawer?.sub}>
           {drawer && (drawer.exps.length===0 ? (
-            <div style={{textAlign:"center",padding:"60px 0",color:K.sub,fontSize:17}}>No expenses for this period</div>
+            <div style={{textAlign:"center",padding:"60px 0",color:K.sub,fontSize:16}}>No expenses for this period</div>
           ) : Object.entries(drawerGrouped).map(([date,exps])=>(
             <div key={date}>
-              <div style={{display:"flex",justifyContent:"space-between",padding:"14px 22px 10px",background:K.card2,borderBottom:`1px solid ${K.border}`}}>
-                <span style={{fontSize:14,fontWeight:800,color:K.sub}}>{new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
-                <span style={{fontSize:14,fontWeight:900,color:K.amber}}>{moneyFull(total(exps))}</span>
+              <div style={{display:"flex",justifyContent:"space-between",padding:"12px 20px 8px",background:K.card2,borderBottom:`1px solid ${K.border}`}}>
+                <span style={{fontSize:13,fontWeight:700,color:K.sub}}>{new Date(date+"T12:00:00").toLocaleDateString("en-US",{weekday:"short",month:"short",day:"numeric"})}</span>
+                <span style={{fontSize:13,fontWeight:800,color:K.amber}}>{moneyFull(total(exps))}</span>
               </div>
               {exps.map((ex,i)=><ExpRow key={ex.id} ex={ex} index={i}
                 onEdit={()=>{setDrawer(null);setTimeout(()=>openEdit(ex),250);}}
@@ -1474,26 +1838,35 @@ export default function App() {
           )))}
         </BottomSheet>
 
-        {/* ── TOAST — spring in/out ──────────────────────────── */}
+        {/* ── TOAST ─────────────────────────────────────── */}
         <AnimatePresence>
           {toast && (
             <motion.div
               key="toast"
-              initial={{ opacity: 0, y: -28, scale: 0.82 }}
-              animate={{ opacity: 1, y: 0,   scale: 1 }}
-              exit={{    opacity: 0, y: -20,  scale: 0.9 }}
-              transition={{ type: "spring", stiffness: 380, damping: 24 }}
+              initial={{ opacity:0,y:-30,scale:0.8 }}
+              animate={{ opacity:1,y:0,scale:1 }}
+              exit={{ opacity:0,y:-20,scale:0.88 }}
+              transition={{ type:"spring",stiffness:420,damping:26 }}
               style={{
-                position:"absolute", top:90, left:"50%",
+                position:"absolute",top:88,left:"50%",
                 transform:"translateX(-50%)",
-                background:toast.bad?K.red:K.green,
-                color:"#FFF", padding:"14px 28px",
-                borderRadius:28, fontSize:16, fontWeight:800,
-                zIndex:600, whiteSpace:"nowrap",
-                boxShadow:"0 10px 40px rgba(0,0,0,.5)",
-                // Note: translateX(-50%) is baked in via left+transform — motion handles y on top of it
+                background:toast.bad
+                  ? `linear-gradient(135deg,${K.red}ee,${K.red}cc)`
+                  : `linear-gradient(135deg,#166534ee,#14532dcc)`,
+                color:"#FFF",padding:"12px 22px",
+                borderRadius:30,fontSize:15,fontWeight:700,
+                zIndex:600,whiteSpace:"nowrap",
+                boxShadow:toast.bad
+                  ? `0 12px 40px ${K.red}50`
+                  : "0 12px 40px rgba(22,101,52,.5)",
+                display:"flex",alignItems:"center",gap:8,
+                border:"1px solid rgba(255,255,255,.15)",
+                backdropFilter:"blur(8px)",
               }}
-            >{toast.msg}</motion.div>
+            >
+              {toast.icon && <span style={{fontSize:18}}>{toast.icon}</span>}
+              {toast.msg}
+            </motion.div>
           )}
         </AnimatePresence>
 
@@ -1508,19 +1881,25 @@ export default function App() {
         input[type=date]::-webkit-calendar-picker-indicator { filter:${dark?"invert(1)":"none"}; opacity:.7; cursor:pointer; }
         ::-webkit-scrollbar { display:none; }
         @keyframes blobMove {
-          0% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(12px, -18px) scale(1.08); }
-          100% { transform: translate(0, 0) scale(1); }
+          0% { transform: translate(0,0) scale(1); }
+          50% { transform: translate(14px,-20px) scale(1.08); }
+          100% { transform: translate(0,0) scale(1); }
         }
         @keyframes blobMoveAlt {
-          0% { transform: translate(0, 0) scale(1); }
-          50% { transform: translate(-20px, 16px) scale(1.05); }
-          100% { transform: translate(0, 0) scale(1); }
+          0% { transform: translate(0,0) scale(1); }
+          50% { transform: translate(-22px,18px) scale(1.06); }
+          100% { transform: translate(0,0) scale(1); }
         }
-        @keyframes floatDots {
-          0% { transform: translate(-50%, -50%) translateY(0); opacity:.8; }
-          50% { transform: translate(-50%, -50%) translateY(-12px); opacity:.35; }
-          100% { transform: translate(-50%, -50%) translateY(0); opacity:.8; }
+        @keyframes shimmer {
+          0% { background-position: 200% 0; }
+          100% { background-position: -200% 0; }
+        }
+        @keyframes rippleAnim {
+          to { transform: translate(-50%,-50%) scale(60); opacity: 0; }
+        }
+        @keyframes floatIn {
+          from { opacity:0; transform: translateY(8px) scale(0.96); }
+          to { opacity:1; transform: translateY(0) scale(1); }
         }
       `}</style>
     </div>
